@@ -16,7 +16,8 @@ original.png
     ▼
 ┌─────────────────┐
 │  0. extend       │  Grow reference frame if content is cut through real content.
-│  (Phase 0.5)     │  → ./decomposition/extended/
+│  (Phase 0.5)     │  Any edge, several edges at once.
+│                  │  → ./decomposition/extended/
 └────────┬────────┘
          │
          ▼
@@ -65,7 +66,7 @@ ai-decompose -i original.png --advanced --out ./output
 
 | Role | Stage | Purpose |
 |------|-------|---------|
-| `extender` | extend | Decide if frame needs growing; write band instruction |
+| `extender` | extend | Decide if the frame needs growing and on which edges; write the band instruction |
 | `decomposer` | decompose | Name screens, crop/restore sub-references |
 | `rectifier` | rectify | Place quad corners, call `correct_perspective` |
 | `restorer` | reconstruct | Identify defects (leftover/missing/seam/artefact), write patch instructions |
@@ -80,6 +81,52 @@ Sharp → Canvas → ImageMagick fallback chain:
 - `magick.js`: ImageMagick wrapper
 - `padding.js`: canvas expansion
 - `canvas.js`: node-canvas abstraction
+
+### Growing the frame (extend)
+
+The extend stage asks the `extender` role whether the frame cuts real content, and the role
+names **every** edge that cuts it: `top`, `right`, `bottom`, `left` — one edge or several at
+once. The source pixels keep their own scale and their own place in the new canvas (the
+canvas is padded around them, not stretched), the editor paints only into the empty bands, and
+the harness stitches the bands back over the untouched source, fading the seam along the side
+that touches the picture. A picture cut at the top and at the bottom grows at both ends.
+
+### Cutting a collage into screens
+
+The `decomposer` names every screen of the picture and gives the rectangle of each one; the
+`rectifier` places the four corners of every screen it sees. When a role names the corners but
+does not write the file, the stage runs the projection itself — the projection is the cut, so
+a collage of three phones becomes three screens even when the model forgot the tool call.
+
+The collage is cut out of the **reference**, not out of the crops the `decomposer` made of it:
+the reference is the ground truth of the picture, and a model that reads three tilted phones as
+two flat screens cuts it in the wrong place. The rectifier works on the whole picture and names
+the corners of every screen it holds; the crops of the reference are replaced by that cut. When
+the reference cannot be cut, the crops are worked on as they are, so a good crop is never thrown
+away. A sub-reference that was regenerated, repaired or exported from another source is never
+treated as a crop — it carries work of its own and is worked on as it is.
+
+One picture cut into several screens becomes several screens in `decomposition.json`: the chain
+of the files follows every branch, so the answer names every screen of the collage.
+
+### What the run reports
+
+Every stage says what it decided and what it produced — the edges that were grown, the screens
+that were cut, the files that were projected, the layers that were found — and the run ends
+with a summary:
+
+```
+Done.
+  output: C:/out/decomposition.json
+  screens: 3
+    - home → decomposition/screens/01-home.png
+    - transfer → decomposition/screens/02-transfer.png
+    - articles → decomposition/screens/03-articles.png
+  layers: 12
+```
+
+`decomposition.json` is written before the layer split, so the answer exists even when the
+split is slow or fails.
 
 ### The layer split (advanced mode)
 

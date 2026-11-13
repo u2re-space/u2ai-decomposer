@@ -1007,34 +1007,67 @@ export async function rasterSplit({ input, outputDir, rows, cols, cwd = process.
 }
 
 /**
- * Pad an image with transparent pixels on the right and bottom edges until both sides are multiples
- * of 16, without scaling the source pixels. Providers that reject other sizes get a valid frame and
- * the original box is restored from the returned padding.
+ * Pad an image with transparent pixels until both sides are multiples of 16, without scaling the
+ * source pixels. Providers that reject other sizes get a valid frame and the original box is
+ * restored from the returned padding.
  * `targetWidth`/`targetHeight` raise that floor to a frame the model requires — the smallest canvas
- * a megapixel-class model accepts, for instance. The source pixels stay put in the top-left corner,
- * only empty space is added, so the same restore cuts the padding back off the reply.
- * @param {{ bytes: Buffer, engine?: 'auto'|'sharp'|'canvas'|'magick', targetWidth?: number|null, targetHeight?: number|null }} options
- * @returns {Promise<{ bytes: Buffer, width: number, height: number, originalWidth: number, originalHeight: number, padded: boolean, engine: string }|null>}
+ * a megapixel-class model accepts, for instance. `offsetX`/`offsetY` put the source pixels away
+ * from the top-left corner, so a band may be grown on the top or on the left as well. The source
+ * pixels keep their own size and their own place, only empty space is added around them.
+ * @param {{ bytes: Buffer, engine?: 'auto'|'sharp'|'canvas'|'magick', targetWidth?: number|null, targetHeight?: number|null, offsetX?: number, offsetY?: number }} options
+ * @returns {Promise<{ bytes: Buffer, width: number, height: number, originalWidth: number, originalHeight: number, offsetX: number, offsetY: number, padded: boolean, engine: string }|null>}
  * @exports
  * @ai.hint io
  */
-export async function rasterPadImageBytes({ bytes, engine = 'auto', targetWidth = null, targetHeight = null }) {
+export async function rasterPadImageBytes({
+    bytes, engine = 'auto', targetWidth = null, targetHeight = null, offsetX = 0, offsetY = 0,
+}) {
     const active = await getEngine(engine);
     if (!active) return null;
     const info = await rasterInfoFromBytes(bytes, active);
     if (!info.width || !info.height) throw new Error('Cannot read the dimensions of the input image.');
-    const width = Math.max(Math.ceil(info.width / 16) * 16, Math.ceil(Math.max(1, Number(targetWidth) || 1) / 16) * 16);
-    const height = Math.max(Math.ceil(info.height / 16) * 16, Math.ceil(Math.max(1, Number(targetHeight) || 1) / 16) * 16);
+    const left = Math.max(0, Math.round(Number(offsetX) || 0));
+    const top = Math.max(0, Math.round(Number(offsetY) || 0));
+    const width = Math.max(
+        Math.ceil((info.width + left) / 16) * 16,
+        Math.ceil(Math.max(1, Number(targetWidth) || 1) / 16) * 16,
+    );
+    const height = Math.max(
+        Math.ceil((info.height + top) / 16) * 16,
+        Math.ceil(Math.max(1, Number(targetHeight) || 1) / 16) * 16,
+    );
+    const right = width - info.width - left;
+    const bottom = height - info.height - top;
     const padded = width !== info.width || height !== info.height;
     const frame = await decodeRgba(bytes, active.name);
-    if (!padded) return { bytes, width, height, originalWidth: frame.width, originalHeight: frame.height, padded: false, engine: active.name };
+    if (!padded) {
+        return {
+            bytes, width, height, originalWidth: frame.width, originalHeight: frame.height,
+            offsetX: left, offsetY: top, padded: false, engine: active.name,
+        };
+    }
     if (active.name === 'sharp') {
-        const output = await active.lib(bytes).rotate().extend({ right: width - frame.width, bottom: height - frame.height, background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
-        return { bytes: output, width, height, originalWidth: frame.width, originalHeight: frame.height, padded: true, engine: active.name };
+        const output = await active.lib(bytes).rotate()
+            .extend({ left, top, right, bottom, background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+        return {
+            bytes: output, width, height, originalWidth: frame.width, originalHeight: frame.height,
+            offsetX: left, offsetY: top, padded: true, engine: active.name,
+        };
     }
     const output = { width, height, channels: 4, data: Buffer.alloc(width * height * 4) };
-    for (let row = 0; row < frame.height; row++) frame.data.copy(output.data, row * width * 4, row * frame.width * 4, (row + 1) * frame.width * 4);
-    return { bytes: await encodePng(output, active.name), width, height, originalWidth: frame.width, originalHeight: frame.height, padded: true, engine: active.name };
+    for (let row = 0; row < frame.height; row++) {
+        frame.data.copy(
+            output.data,
+            ((row + top) * width + left) * 4,
+            row * frame.width * 4,
+            (row + 1) * frame.width * 4,
+        );
+    }
+    return {
+        bytes: await encodePng(output, active.name), width, height,
+        originalWidth: frame.width, originalHeight: frame.height,
+        offsetX: left, offsetY: top, padded: true, engine: active.name,
+    };
 }
 
 /**

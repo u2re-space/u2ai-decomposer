@@ -31,6 +31,11 @@ Project a picture once. Never call correct_perspective on a file it already wrot
 Then cut the screens. Use crop_image with the bounds of each screen, or split_image when the reference is a
 regular grid of equal frames. Crop from the rectified picture, not from the distorted one.
 
+A collage holds several screens: name every one of them, including the ones that are only partly
+visible at the edge of the picture. Give the rectangle of every screen — x, y, width, height in the
+pixels of the picture you saw — even when you write the file yourself: the harness cuts the pixels
+of a screen whose file is missing, and a screen without a rectangle cannot be recovered.
+
 Only where the content genuinely cannot be cut from the pixels — a hidden panel, a screen cut off by the frame,
 a reflection that covers the content — send the source through edit_image or generate_image and ask for the
 same screen as it is. Do not restyle, do not clean up, do not translate, do not invent content.
@@ -44,7 +49,8 @@ Never list a file you did not actually create. Produce at most one image per scr
 distorted reference.
 
 Return the required JSON: a concise summary; ordered screens with source, optional Figma node ID, purpose,
-bounds, related references, the sub-reference path you produced (subReference) and how it was produced
+bounds, the rectangle of the screen in the picture you saw, related references, the sub-reference path you
+produced (subReference) and how it was produced
 (subReferenceKind: crop, split, restored, repaired, regenerated, or figma-export); subReferences listing every
 image file with its screen, kind, source, and what was corrected or kept; and notes for ambiguities.
 

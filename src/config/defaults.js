@@ -155,7 +155,7 @@ export const defaults = {
       /** Max agent turns for the per-screen split pass. */
       maxSplitTurns: 32,
       /** Max rectifier calls per screen (the first one plus the re-correct attempts). */
-      maxAttempts: 2,
+      maxAttempts: 3,
       /** Residual tilt (deg) that counts as a level screen. */
       residualSkewLimitDeg: 0.8,
       /** How much flatter the result has to be than the source. */

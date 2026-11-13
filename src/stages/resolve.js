@@ -71,10 +71,11 @@ const TIGHT_BOX_PROMPT = 'Report each bounding_box as the tightest rectangle tha
  * The chain of the files: what replaced what.
  *
  * Every stage that writes a new file remembers the file it replaced, so the chain is a map from a
- * path to the path that took its place. A stage that kept the original maps a path onto itself,
- * which is where the walk stops.
+ * path to the paths that took its place. One source may become several files — a collage is cut
+ * one screen at a time — so a path maps to a list, not to a single file. A stage that kept the
+ * original maps a path onto itself, which is where the walk stops.
  * @param {object} state pipeline state
- * @returns {Map<string, { to: string, kind: string, stage: string }>}
+ * @returns {Map<string, Array<{ to: string, kind: string, stage: string }>>}
  * @ai.hint pure
  */
 export function buildChain(state) {
@@ -89,33 +90,51 @@ export function buildChain(state) {
             const from = toPosix(entry?.from ?? '');
             const to = toPosix(entry?.to ?? '');
             if (!from || !to || from === to) continue;
-            chain.set(from, { to, kind, stage });
+            if (!chain.has(from)) chain.set(from, []);
+            const produced = chain.get(from);
+            if (!produced.some((item) => item.to === to)) produced.push({ to, kind, stage });
         }
     }
     return chain;
 }
 
 /**
- * Walk the chain to the file that ended up on the disk.
+ * Walk the chain to the files that ended up on the disk.
+ *
+ * A source that was cut into several screens has several ends, and every branch of the chain is
+ * walked to its own end: the screens of a collage are the files of the last stage.
  * @param {string} start the path the screen was born with
- * @param {Map<string, { to: string, kind: string, stage: string }>} chain
- * @returns {{ path: string, kind: string|null, steps: string[] }}
+ * @param {Map<string, Array<{ to: string, kind: string, stage: string }>>} chain
+ * @returns {{ paths: string[], path: string, kind: string|null, steps: string[] }}
  * @ai.hint pure
  */
 export function followChain(start, chain) {
-    let current = toPosix(start ?? '');
-    let kind = null;
-    const steps = [];
-    const seen = new Set();
-    while (current && !seen.has(current)) {
-        seen.add(current);
-        const next = chain.get(current);
-        if (!next) break;
-        current = next.to;
-        kind = next.kind;
-        steps.push(next.stage);
-    }
-    return { path: current, kind, steps };
+    const walk = (current, seen) => {
+        const key = toPosix(current ?? '');
+        if (!key || seen.has(key)) return [{ path: key, kind: null, steps: [] }];
+        const next = chain.get(key);
+        if (!next?.length) return [{ path: key, kind: null, steps: [] }];
+        const out = [];
+        for (const item of next) {
+            for (const tail of walk(item.to, new Set([...seen, key]))) {
+                out.push({
+                    path: tail.path,
+                    kind: tail.kind ?? item.kind,
+                    steps: [item.stage, ...tail.steps],
+                });
+            }
+        }
+        return out;
+    };
+    const ends = walk(start, new Set());
+    const paths = ends.map((end) => end.path).filter(Boolean);
+    const steps = ends[0]?.steps ?? [];
+    return {
+        paths: paths.length ? paths : [toPosix(start ?? '')],
+        path: paths[0] ?? toPosix(start ?? ''),
+        kind: ends[0]?.kind ?? null,
+        steps,
+    };
 }
 
 /**
@@ -184,27 +203,51 @@ export async function runResolve(state, notify = () => {}) {
     const chain = buildChain(state);
 
     // Every screen points at the file that ended up on the disk — and that file has to be there.
+    // One screen may have been cut into several: a collage is three screens, not one.
     const entries = [];
     const notes = [...(state?.decomposition?.notes ?? [])];
-    for (const screen of state?.screens ?? []) {
+    // When the decompose stage named no screen, the files the later stages produced are the
+    // screens: an answer that lists nothing is not an answer.
+    const screens = Array.isArray(state?.screens) && state.screens.length
+        ? state.screens
+        : (state?.rectified ?? [])
+            .filter((item) => item?.to)
+            .map((item) => ({
+                name: String(item.screen ?? '').trim() || 'screen',
+                source: '',
+                subReference: item.to,
+                subReferenceKind: 'crop',
+            }));
+    for (const screen of screens) {
         const name = String(screen?.name ?? '').trim() || '(unnamed)';
         const traced = followChain(screen?.subReference, chain);
-        const located = traced.path
-            ? await resolveInside(root, traced.path, { allowRoot: false }).catch(() => null)
-            : null;
-        const info = located ? await stat(located.abs).catch(() => null) : null;
-        if (!info?.isFile()) {
-            notes.push(`The screen "${name}" has no file (${traced.path || 'no path'}).`);
-            entries.push({ screen, rel: null, kind: '', steps: traced.steps, missing: true });
-            continue;
+        const paths = traced.paths.length ? traced.paths : [traced.path];
+        for (const [index, candidate] of paths.entries()) {
+            const located = candidate
+                ? await resolveInside(root, candidate, { allowRoot: false }).catch(() => null)
+                : null;
+            const info = located ? await stat(located.abs).catch(() => null) : null;
+            if (!info?.isFile()) {
+                notes.push(`The screen "${name}" has no file (${candidate || 'no path'}).`);
+                entries.push({
+                    screen: paths.length > 1 ? { ...screen, name: `${name}-${index + 1}` } : screen,
+                    rel: null,
+                    kind: '',
+                    steps: traced.steps,
+                    missing: true,
+                });
+                continue;
+            }
+            entries.push({
+                screen: paths.length > 1
+                    ? { ...screen, name: screen.name ? `${name}-${index + 1}` : name }
+                    : screen,
+                rel: candidate,
+                kind: traced.kind || screen?.subReferenceKind || 'crop',
+                steps: traced.steps,
+                missing: false,
+            });
         }
-        entries.push({
-            screen,
-            rel: traced.path,
-            kind: traced.kind || screen?.subReferenceKind || 'crop',
-            steps: traced.steps,
-            missing: false,
-        });
     }
 
     const resolved = {
@@ -226,6 +269,20 @@ export async function runResolve(state, notify = () => {}) {
         notes,
         layers: [],
     };
+
+    // The JSON is written before the layer split: the answer of the pipeline exists even when the
+    // split is slow or fails, and the screens of the decomposition can be read while it runs.
+    const jsonPath = path.join(root, outDir, DECOMPOSITION_FILE);
+    await mkdir(path.dirname(jsonPath), { recursive: true });
+    await writeFile(jsonPath, `${JSON.stringify(resolved, null, 2)}\n`);
+    state.decomposition = resolved;
+    state.outputPath = jsonPath;
+    notify({
+        type: 'resolve.json',
+        path: jsonPath,
+        screens: resolved.screens.length,
+        files: resolved.subReferences.length,
+    });
 
     // Advanced mode: one screen split into layers.
     const wantLayers = Boolean(advanced || config?.stages?.resolve?.layers);
@@ -261,18 +318,14 @@ export async function runResolve(state, notify = () => {}) {
         }
     }
 
-    const jsonPath = path.join(root, outDir, DECOMPOSITION_FILE);
-    await mkdir(path.dirname(jsonPath), { recursive: true });
     await writeFile(jsonPath, `${JSON.stringify(resolved, null, 2)}\n`);
-
-    state.decomposition = resolved;
-    state.outputPath = jsonPath;
 
     notify({
         type: 'resolve.done',
         path: jsonPath,
         screens: resolved.screens.length,
         layers: resolved.layers.length,
+        screenFiles: resolved.subReferences.map((entry) => entry.path),
     });
 }
 

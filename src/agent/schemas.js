@@ -23,6 +23,13 @@ export const SUB_REFERENCE_KINDS = ['crop', 'split', 'restored', 'repaired', 're
  */
 export const DECOMPOSER_KINDS = ['', ...SUB_REFERENCE_KINDS];
 
+const rect = object({
+    x: { type: 'integer', description: 'Left edge of the screen in the pixels of the picture the model saw.' },
+    y: { type: 'integer', description: 'Top edge of the screen in the pixels of the picture the model saw.' },
+    width: { type: 'integer', description: 'Width of the screen in pixels.' },
+    height: { type: 'integer', description: 'Height of the screen in pixels.' },
+});
+
 export const DECOMPOSER_SCHEMA = object({
     summary: { ...string, description: 'How the provided design divides into screens or meaningful fragments.' },
     screens: {
@@ -35,6 +42,7 @@ export const DECOMPOSER_SCHEMA = object({
             purpose: { ...string, description: 'What this screen represents.' },
             bounds: { ...nullableString, description: 'Image coordinates or Figma frame bounds.' },
             references: { ...strings, description: 'Other screens or nodes related to this one.' },
+            rect: { ...rect, description: 'The rectangle of the screen in the picture the model saw. The harness cuts it when the file was not written.' },
             subReference: { ...nullableString, description: 'Path of the image produced for this screen.' },
             subReferenceKind: { type: 'string', enum: DECOMPOSER_KINDS, description: 'How this sub-reference was produced.' },
         }),
@@ -51,13 +59,6 @@ export const DECOMPOSER_SCHEMA = object({
         }),
     },
     notes: { ...strings, description: 'Ambiguities, inaccessible sources, or regeneration notes.' },
-});
-
-const rect = object({
-    x: { type: 'integer', description: 'Left edge of the screen in the pixels of the picture the model saw.' },
-    y: { type: 'integer', description: 'Top edge of the screen in the pixels of the picture the model saw.' },
-    width: { type: 'integer', description: 'Width of the screen in pixels.' },
-    height: { type: 'integer', description: 'Height of the screen in pixels.' },
 });
 
 /**
@@ -95,12 +96,22 @@ export const DECOMPOSER_INLINE_SCHEMA = object({
     notes: { ...strings, description: 'Ambiguities, inaccessible sources, or regeneration notes.' },
 });
 
-export const EXTEND_SCHEMA = object({
-    verdict: { type: 'string', enum: ['keep', 'extend'], description: 'keep when complete; extend when cut through content.' },
-    assessment: { ...string, description: 'What is cut off and where, or why the frame is complete.' },
-    edge: { type: 'string', enum: ['', 'bottom', 'right', 'top', 'left'], description: 'The edge the content is clipped by.' },
-    prompt: { ...string, description: 'Instruction for the image editor for the empty band.' },
-});
+export const EXTEND_SCHEMA = {
+    type: 'object',
+    properties: {
+        verdict: { type: 'string', enum: ['keep', 'extend'], description: 'keep when complete; extend when cut through content.' },
+        assessment: { ...string, description: 'What is cut off and where, or why the frame is complete.' },
+        edge: { type: 'string', enum: ['', 'bottom', 'right', 'top', 'left'], description: 'The edge the content is clipped by.' },
+        edges: {
+            type: 'array',
+            items: { type: 'string', enum: ['top', 'right', 'bottom', 'left'] },
+            description: 'Every edge the content is clipped by. Name them all: a picture can be cut at two sides at once.',
+        },
+        prompt: { ...string, description: 'Instruction for the image editor for the empty band.' },
+    },
+    required: ['verdict', 'assessment', 'edge', 'edges', 'prompt'],
+    additionalProperties: false,
+};
 
 const quadCorner = object({
     x: { type: 'number', description: 'X in pixels from the left edge.' },

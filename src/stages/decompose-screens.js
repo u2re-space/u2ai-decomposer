@@ -14,7 +14,9 @@
  * @ai.hint keep
  */
 import path from 'node:path';
+import { stat } from 'node:fs/promises';
 import { clampRect, cropRect } from '../image/crop.js';
+import { rasterInfo } from '../image/raster.js';
 import { toPosix } from '../agent/paths.js';
 
 /**
@@ -99,15 +101,38 @@ export function planScreens({ decomposition, frame, source, limits = {} } = {}) 
 
 /**
  * Cut the planned screens out of the source picture.
- * @param {{ root: string, screensDir: string, source: string, accepted: object[], engine?: string }} params
+ *
+ * With `skipExisting` a file that is already there is not cut again: the role may have written it
+ * under another name than the screen carries, and overwriting it would throw away its work. The
+ * file that is already there is reported as the file of the screen.
+ * @param {{ root: string, screensDir: string, source: string, accepted: object[], engine?: string,
+ *   skipExisting?: boolean }} params
  * @returns {Promise<{ files: object[], warnings: string[] }>}
  */
-export async function cropScreens({ root, screensDir, source, accepted, engine = 'auto' } = {}) {
+export async function cropScreens({ root, screensDir, source, accepted, engine = 'auto', skipExisting = false } = {}) {
     const files = [];
     const warnings = [];
     for (const item of accepted) {
         const name = screenFileName(item.index, item.name);
         const output = path.join(screensDir, name);
+        if (skipExisting) {
+            const there = await stat(output).catch(() => null);
+            if (there?.isFile()) {
+                const info = await rasterInfo(output, { cwd: root, engine }).catch(() => null);
+                files.push({
+                    rel: toPosix(path.relative(root, output)),
+                    abs: output,
+                    bytes: there.size,
+                    width: info?.width ?? null,
+                    height: info?.height ?? null,
+                    screen: item.name,
+                    kind: 'crop',
+                    source: item.source,
+                    note: 'the file was already there',
+                });
+                continue;
+            }
+        }
         try {
             const result = await cropRect({
                 input: source,

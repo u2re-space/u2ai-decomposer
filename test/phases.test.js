@@ -107,12 +107,14 @@ test('extend: the frame asked of the editor is a local pad, not the model floor'
     // Here the canvas is padded locally: the source keeps its own scale, and only a band of a
     // quarter of the long edge is added to it.
     assert.deepEqual(extensionTarget({ width: 1024, height: 768 }, 0.25, 'bottom'),
-        { width: 1024, height: 1024, band: 256 });
+        { width: 1024, height: 1024, band: 256, offsets: { top: 0, right: 0, bottom: 256, left: 0 } });
     assert.deepEqual(extensionTarget({ width: 1024, height: 768 }, 0.25, 'right'),
-        { width: 1280, height: 768, band: 256 });
-    // Only the bottom and the right edge grow: the sources are cut into screens from the top left.
-    assert.equal(extensionTarget({ width: 1024, height: 768 }, 0.25, 'left'), null);
-    assert.equal(extensionTarget({ width: 1024, height: 768 }, 0.25, 'top'), null);
+        { width: 1280, height: 768, band: 256, offsets: { top: 0, right: 256, bottom: 0, left: 0 } });
+    // Every edge of the picture may grow: the source is cut into screens from wherever it is.
+    assert.deepEqual(extensionTarget({ width: 1024, height: 768 }, 0.25, 'left'),
+        { width: 1280, height: 768, band: 256, offsets: { top: 0, right: 0, bottom: 0, left: 256 } });
+    assert.deepEqual(extensionTarget({ width: 1024, height: 768 }, 0.25, 'top'),
+        { width: 1024, height: 1024, band: 256, offsets: { top: 256, right: 0, bottom: 0, left: 0 } });
     // A frame that cannot be measured, or a band that would be empty, is refused.
     assert.equal(extensionTarget({ width: 0, height: 10 }, 0.25, 'bottom'), null);
     assert.equal(extensionTarget(null, 0.25, 'bottom'), null);

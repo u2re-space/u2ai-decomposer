@@ -142,6 +142,46 @@ test('agent mode: a file that does not exist is dropped with a warning', async (
     }
 });
 
+test('agent mode: a screen the role named but did not write is cut by the harness', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-agent-cut-'));
+    try {
+        await writeFile(path.join(root, 'reference.png'), await solidPng(128, 64, [10, 20, 30]));
+        await mkdir(path.join(root, 'decomposition', 'screens'), { recursive: true });
+        await writeFile(path.join(root, 'decomposition', 'screens', '01-first.png'), await solidPng(64, 64, [0, 0, 0]));
+        const data = {
+            summary: 'Two screens',
+            screens: [
+                {
+                    name: 'first', source: 'reference.png', rect: { x: 0, y: 0, width: 64, height: 64 },
+                    subReference: 'decomposition/screens/01-first.png', subReferenceKind: 'crop',
+                },
+                {
+                    name: 'second', source: 'reference.png', rect: { x: 64, y: 0, width: 64, height: 64 },
+                    subReference: 'decomposition/screens/02-second.png', subReferenceKind: 'crop',
+                },
+            ],
+            subReferences: [{ path: 'decomposition/screens/01-first.png', screen: 'first', kind: 'crop', source: 'reference.png', note: '' }],
+            notes: [],
+        };
+        const state = stateFor(root, mockRoles(data));
+        const events = [];
+        await runDecompose(state, (event) => events.push(event));
+
+        assert.equal(state.screensFiles.length, 2, 'the missing screen is cut');
+        const cut = events.find((event) => event.type === 'decompose.cut');
+        assert.ok(cut, 'the cut is reported');
+        assert.equal(cut.screen, 'second');
+        assert.equal(cut.file, 'decomposition/screens/02-second.png');
+        const written = path.join(root, 'decomposition', 'screens', '02-second.png');
+        assert.equal((await stat(written)).isFile(), true);
+        const frame = await sharp(written).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        assert.deepEqual([frame.info.width, frame.info.height], [64, 64]);
+        assert.deepEqual(state.screens[1].subReference, 'decomposition/screens/02-second.png');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test('agent mode: a path outside the working directory is refused', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-agent-escape-'));
     try {

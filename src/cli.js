@@ -171,6 +171,11 @@ export async function main(argv = process.argv.slice(2)) {
         });
         // A stage that threw leaves the run unfinished: the exit code says so, and the pipeline
         // still leaves behind everything that did work.
+        renderer.summary?.({
+            output: result?.output ?? null,
+            outputPath: result?.outputPath ?? null,
+            warnings: result?.warnings ?? [],
+        });
         return result?.failed ? 1 : 0;
     } catch (error) {
         if (error?.name === 'AbortError') {

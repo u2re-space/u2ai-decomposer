@@ -17,7 +17,8 @@
  *   image/raster, image/skew, openai/responses, openai/images, roles/index
  * @usedBy shared/pipeline
  * @exports runRectify, acceptsRectification, producedScreens, validateRectifiedFile,
- *   swapReferencePaths, RECTIFIED_DIR, MAX_RESIDUAL_DEG, MIN_IMPROVEMENT_DEG, RECTIFIER_TOOLS
+ *   swapReferencePaths, quadCorners, screenFileName, projectQuad, opaqueShare, RECTIFIED_DIR,
+ *   MAX_RESIDUAL_DEG, MIN_IMPROVEMENT_DEG, RECTIFIER_TOOLS
  * @ai.tags rectification, perspective, screens
  * @ai.hint keep
  * @ai.hint legacy-0.2
@@ -29,7 +30,8 @@ import { RECTIFY_SCHEMA } from '../agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 import { resolveInside, toPosix } from '../agent/paths.js';
 import { toolSpecs } from '../agent/tool-specs.js';
-import { rasterInfo } from '../image/raster.js';
+import { rasterInfo, decodeRgba } from '../image/raster.js';
+import { perspectiveRectify } from '../image/rectify.js';
 import { measureResidualSkew } from '../image/skew.js';
 import { imagePart } from '../openai/responses.js';
 import { sniffImage } from '../openai/images.js';
@@ -101,10 +103,12 @@ export function producedScreens(data) {
             output: String(entry?.output ?? '').trim(),
             quad: entry?.quad ?? null,
         }))
-        .filter((entry) => entry.output);
+        // A screen with corners but without a path is still a screen: the stage projects it and
+        // names the file itself.
+        .filter((entry) => entry.output || entry.quad);
     if (list.length) return list;
     const output = String(data?.output ?? '').trim();
-    return output ? [{ label: '', output, quad: data?.quad ?? null }] : [];
+    return output || data?.quad ? [{ label: '', output, quad: data?.quad ?? null }] : [];
 }
 
 /**
@@ -167,6 +171,101 @@ export function swapReferencePaths(paths = [], rectified = []) {
 }
 
 /**
+ * Share of the pixels of a file that carry something.
+ *
+ * A projection of a wrong quad comes out mostly transparent: the homography asked for pixels the
+ * picture does not have. Such a file is not a screen.
+ * @param {string} filePath absolute path
+ * @param {string} engine
+ * @returns {Promise<number>}
+ * @ai.hint io
+ */
+export async function opaqueShare(filePath, engine = 'auto') {
+    const bytes = await readFile(filePath).catch(() => null);
+    if (!bytes) return 0;
+    const frame = await decodeRgba(bytes, engine).catch(() => null);
+    if (!frame?.width || !frame?.height) return 0;
+    let filled = 0;
+    for (let at = 3; at < frame.data.length; at += 4) {
+        if (frame.data[at] > 8) filled += 1;
+    }
+    return filled / (frame.width * frame.height);
+}
+
+/**
+ * The four corners of an answer as the array the projection wants.
+ *
+ * The role answers with the corners named (`tl`, `tr`, `br`, `bl`); the projection wants them in
+ * the order top-left, top-right, bottom-left, bottom-right.
+ * @param {object|null} quad the quad of the answer
+ * @returns {Array<{x:number,y:number}>|null}
+ * @exports
+ * @ai.hint pure
+ */
+export function quadCorners(quad) {
+    if (!quad || typeof quad !== 'object') return null;
+    /**
+     * One corner of the quad.
+     * @param {object} point the corner
+     * @returns {{x:number,y:number}|null}
+     */
+    const pick = (point) => {
+        const x = Number(point?.x);
+        const y = Number(point?.y);
+        return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+    };
+    const tl = pick(quad.tl);
+    const tr = pick(quad.tr);
+    const br = pick(quad.br);
+    const bl = pick(quad.bl);
+    if (!tl || !tr || !br || !bl) return null;
+    return [tl, tr, bl, br];
+}
+
+/**
+ * A file name for a screen of the answer: the label of the screen, safe to be a name.
+ * @param {string} label the label the role gave
+ * @param {number} index the number of the screen in the answer
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function screenFileName(label, index) {
+    const stem = String(label ?? '').trim().toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 48) || 'screen';
+    return `${String(index + 1).padStart(2, '0')}-${stem}.png`;
+}
+
+/**
+ * Project the corners of one screen and write the result into the output directory.
+ *
+ * The corners are the hard part of the work and the projection is deterministic, so the stage does
+ * the projection itself when the role named the corners but did not write the file. A model that
+ * answers with the plan and forgets the tool call would otherwise leave the stage with nothing.
+ * @param {{ source: string, outDir: string, label: string, quad: object|null, index: number,
+ *   name?: string|null, cwd: string, engine?: string }} params
+ * @returns {Promise<string|null>} the absolute path of the written file, or null when the corners
+ *   are unusable
+ * @ai.hint io
+ */
+export async function projectQuad({
+    source, outDir, label, quad, index, name = null, cwd, engine = 'auto',
+}) {
+    const corners = quadCorners(quad);
+    if (!corners) return null;
+    const fileName = name && /\.png$/i.test(name) ? path.basename(name) : screenFileName(label, index);
+    const output = path.join(outDir, fileName);
+    try {
+        await perspectiveRectify({ input: source, output, quad: corners, cwd, engine });
+    } catch {
+        return null;
+    }
+    return output;
+}
+
+/**
  * Ask the rectifier role about one reference.
  * @param {{ root: string, roles: object, file: { rel: string, abs: string }, frame: object,
  *   outDirRel: string, extraTools: object[]|null, model: string|null, effort: string|null,
@@ -211,11 +310,55 @@ async function askRectifier({ root, roles, file, frame, outDirRel, extraTools, m
 function inputFiles(state, root) {
     if (Array.isArray(state.screensFiles) && state.screensFiles.length) {
         return state.screensFiles.map((file) => ({
+            ...file,
             rel: toPosix(file.rel),
             abs: file.abs ?? path.resolve(root, file.rel),
         }));
     }
     return (state.images ?? []).map((rel) => ({ rel: toPosix(rel), abs: path.resolve(root, rel) }));
+}
+
+/**
+ * The pictures the run started from: the reference, extended when it had to be.
+ *
+ * The reference is the ground truth of a collage. The decompose stage cuts it into sub-references
+ * with the eyes of a model, and a model that reads a collage of three phones as two flat screens
+ * cuts it in the wrong place. The rectifier works on the whole picture and names the corners of
+ * every screen it holds, so the reference is what the stage cuts.
+ * @param {object} state pipeline state
+ * @param {string} root project root
+ * @returns {Array<{ rel: string, abs: string }>}
+ * @ai.hint pure
+ */
+export function referenceFiles(state, root) {
+    const rels = Array.isArray(state.references) && state.references.length
+        ? state.references
+        : (state.images ?? []);
+    return rels.map((rel) => ({ rel: toPosix(rel), abs: path.resolve(root, rel) }));
+}
+
+/**
+ * Is this sub-reference a plain crop of one of the references?
+ *
+ * A crop carries nothing the reference does not have, so the reference is cut instead of it. A
+ * sub-reference that was regenerated, repaired or exported from another source is not a crop: it
+ * carries work of its own and is worked on as it is.
+ * @param {{ rel: string, kind?: string, source?: string }} file the sub-reference
+ * @param {Array<{ rel: string }>} references the references of the run
+ * @returns {{ rel: string }|null} the reference the file was cut from
+ * @ai.hint pure
+ */
+export function cropOfReference(file, references) {
+    if (!file) return null;
+    const kind = String(file.kind ?? 'crop').trim();
+    if (kind && kind !== 'crop') return null;
+    const source = toPosix(String(file.source ?? '').trim());
+    if (!source) return null;
+    return references.find((reference) => (
+        source === reference.rel
+        || source.endsWith(`/${reference.rel}`)
+        || reference.rel.endsWith(`/${source}`)
+    )) ?? null;
 }
 
 /**
@@ -231,8 +374,9 @@ function inputFiles(state, root) {
  */
 export async function runRectify(state, notify = () => {}) {
     const { root, workDir, config, roles, model, effort, warnings, toolset } = state;
-    const files = inputFiles(state, root);
-    if (!files.length) {
+    const references = referenceFiles(state, root);
+    const screens = inputFiles(state, root);
+    if (!references.length && !screens.length) {
         warnings.push('rectify: no screens to rectify');
         return;
     }
@@ -261,23 +405,28 @@ export async function runRectify(state, notify = () => {}) {
     const rectified = [];
     const kept = [];
 
-    for (const file of files) {
+    /**
+     * Work on one picture: ask the role about it, project the screens it named, keep what passed.
+     * @param {{ rel: string, abs: string }} file the picture to work on
+     * @returns {Promise<object[]>} the screens that were accepted
+     */
+    const processUnit = async (file) => {
+        const accepted = [];
         const located = await resolveInside(root, file.rel, { allowRoot: false }).catch(() => null);
         if (!located) {
             warnings.push(`rectify: ${file.rel} is outside the working directory`);
-            continue;
+            return accepted;
         }
         const frame = await rasterInfo(located.abs, { cwd: root, engine }).catch(() => null);
         if (!frame?.width || !frame?.height) {
             warnings.push(`rectify: cannot read ${file.rel}`);
             kept.push({ from: file.rel, kept: true, reason: 'the file cannot be read' });
-            continue;
+            return accepted;
         }
 
         const sourceSkew = await measureResidualSkew(located.abs, { maxSide: 900, maxAngleDeg: 15, stepDeg: 0.1 })
             .catch(() => null);
 
-        let accepted = [];
         let kind = 'project';
         let note = '';
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -317,11 +466,44 @@ export async function runRectify(state, notify = () => {}) {
             }
 
             let residual = null;
-            for (const entry of produced) {
-                const outputAbs = path.isAbsolute(entry.output) ? path.resolve(entry.output) : path.resolve(root, entry.output);
-                const valid = await validateRectifiedFile(outputAbs, outDir);
+            const missing = [];
+            for (const [index, entry] of produced.entries()) {
+                let outputAbs = path.isAbsolute(entry.output) ? path.resolve(entry.output) : path.resolve(root, entry.output);
+                let valid = await validateRectifiedFile(outputAbs, outDir);
                 if (!valid.ok) {
-                    warnings.push(`rectify: ${file.rel}: the result "${entry.output}" was not accepted — ${valid.reason}`);
+                    // The role named the corners but did not write the file. The projection is
+                    // deterministic, so the stage does it: the screen is cut out and levelled even
+                    // when the model answered with the plan and forgot the tool call.
+                    const projected = await projectQuad({
+                        source: located.abs,
+                        outDir,
+                        label: entry.label,
+                        quad: entry.quad,
+                        index,
+                        name: path.basename(entry.output ?? ''),
+                        cwd: root,
+                        engine,
+                    });
+                    if (projected) {
+                        outputAbs = projected;
+                        valid = await validateRectifiedFile(outputAbs, outDir);
+                        if (valid.ok) {
+                            notify({
+                                type: 'rectify.projected',
+                                file: toPosix(path.relative(root, outputAbs)),
+                                screen: entry.label,
+                            });
+                        }
+                    }
+                }
+                if (!valid.ok) {
+                    // The file is missing and the corners could not be projected: the model has to
+                    // place them again, and the reader has to know what was wrong.
+                    const reason = valid.reason === 'the output file was not found'
+                        ? 'the file was not written and the corners could not be projected'
+                        : valid.reason;
+                    warnings.push(`rectify: ${file.rel}: the result "${entry.output}" was not accepted — ${reason}`);
+                    missing.push(`${entry.output} (${reason})`);
                     continue;
                 }
                 const to = toPosix(path.relative(root, outputAbs));
@@ -333,7 +515,18 @@ export async function runRectify(state, notify = () => {}) {
 
                 const resultSkew = await measureResidualSkew(outputAbs, { maxSide: 900, maxAngleDeg: 15, stepDeg: 0.1 })
                     .catch(() => null);
-                if (resultSkew && sourceSkew) {
+                // A projection of wrong corners comes out empty: that is not a screen.
+                const filled = await opaqueShare(outputAbs, engine);
+                if (filled < 0.5) {
+                    warnings.push(`rectify: ${to}: the screen was not accepted — the projection is empty `
+                        + `(${Math.round(filled * 100)}% of the file carries pixels)`);
+                    await unlink(outputAbs).catch(() => {});
+                    continue;
+                }
+                // The tilt gate protects a single screen from being warped. When one picture is cut
+                // into several screens, the projection is the cut itself and the tilt of the whole
+                // collage says nothing about the screens it holds.
+                if (resultSkew && sourceSkew && produced.length === 1) {
                     const accept = acceptsRectification(sourceSkew, resultSkew, maxResidualDeg, minImprovementDeg);
                     if (!accept.ok) {
                         warnings.push(`rectify: ${to}: the screen was not accepted — ${accept.reason}`);
@@ -364,6 +557,17 @@ export async function runRectify(state, notify = () => {}) {
 
             if (accepted.length) break;
             if (attempt < maxAttempts) {
+                if (missing.length) {
+                    // The model named the files but wrote nothing: it has to call the tool, or name
+                    // the corners so that the stage can project them.
+                    kind = 'split';
+                    note = `These results were refused: ${missing.join('; ')}. Call correct_perspective for every `
+                        + 'screen of this picture and name the four corners of each screen in your answer as well, so the '
+                        + 'screen can be cut out and levelled even if the tool call does not come through. The corners '
+                        + 'belong to the interface of the screen, inside the picture: 0 to '
+                        + `${frame.width} across and 0 to ${frame.height} down.`;
+                    continue;
+                }
                 kind = residual === null ? 'split' : 'project';
                 note = residual === null
                     ? SPLIT_NOTE
@@ -374,7 +578,41 @@ export async function runRectify(state, notify = () => {}) {
             kept.push({ from: file.rel, kept: true, reason: 'no screen passed the tilt check' });
         }
 
+        return accepted;
+    };
+
+    // The reference is cut into screens, and the crops the decompose stage made of it are replaced
+    // by that cut. When the reference cannot be cut, the crops are the screens after all.
+    const cropsOf = new Map();
+    for (const file of screens) {
+        const reference = cropOfReference(file, references);
+        if (!reference) continue;
+        if (!cropsOf.has(reference.rel)) cropsOf.set(reference.rel, []);
+        cropsOf.get(reference.rel).push(file);
+    }
+
+    for (const reference of references) {
+        const crops = cropsOf.get(reference.rel) ?? [];
+        // A reference without crops was not cut by the decompose stage: it is one screen, and the
+        // decompose output is the screen that was made of it.
+        if (!crops.length && screens.length) continue;
+        const accepted = await processUnit(reference);
+        if (!accepted.length) {
+            // The reference could not be cut: the crops of it are worked on as they are.
+            for (const crop of crops) rectified.push(...await processUnit(crop));
+            continue;
+        }
         rectified.push(...accepted);
+        // The crops of the reference are the screens the reference was cut into.
+        for (const crop of crops) {
+            for (const item of accepted) rectified.push({ ...item, from: crop.rel });
+        }
+    }
+
+    // The sub-references that carry work of their own are worked on as they are.
+    for (const file of screens) {
+        if (cropOfReference(file, references)) continue;
+        rectified.push(...await processUnit(file));
     }
 
     state.rectified.push(...rectified, ...kept);

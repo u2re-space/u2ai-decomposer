@@ -30,11 +30,15 @@ Options:
 
 Pipeline stages:
   extend          Grow reference frame if content is cut through real content.
+                  Any edge, several edges at once.
   decompose       Split reference into ordered screens with sub-references.
   rectify         Un-rotate / recover projection, cut collages into screens.
   reconstruct     Restore lost details via AI box-patch and verify.
   overlap         Remove overlapping elements from/by other screens (AI).
   resolve         Assemble final decomposition.json + layers (advanced).
+
+Every stage reports what it decided and what it produced; the run ends with a summary
+of the output path, the screens and the number of layers.
 
 Config:
   Stored in ~/.ai-decompose/config.json.

@@ -13,8 +13,12 @@ import sharp from 'sharp';
 
 import {
     acceptsRectification,
+    cropOfReference,
     producedScreens,
+    projectQuad,
+    quadCorners,
     runRectify,
+    screenFileName,
     swapReferencePaths,
     validateRectifiedFile,
     RECTIFIED_DIR,
@@ -23,6 +27,7 @@ import { defaults, validateConfig } from '../src/config.js';
 
 const SCREEN_REL = 'decomposition/screens/01-home.png';
 const RECT_REL = `decomposition/${RECTIFIED_DIR}/01-home.png`;
+const REFERENCE_REL = 'decomposition/extended/app.png';
 
 /** A picture of horizontal stripes: the shape the skew measurement looks for. */
 const stripes = async (degrees = 0) => {
@@ -120,6 +125,56 @@ test('a copy is kept only when the tilt really went down', () => {
 // ---------------------------------------------------------------------------
 // The stage
 // ---------------------------------------------------------------------------
+
+test('the corners of an answer are read in the order the projection wants', () => {
+    const quad = { tl: { x: 1, y: 2 }, tr: { x: 3, y: 4 }, br: { x: 5, y: 6 }, bl: { x: 7, y: 8 } };
+    assert.deepEqual(quadCorners(quad), [
+        { x: 1, y: 2 }, { x: 3, y: 4 }, { x: 7, y: 8 }, { x: 5, y: 6 },
+    ]);
+    assert.equal(quadCorners(null), null);
+    assert.equal(quadCorners({ tl: { x: 1, y: 2 } }), null);
+    assert.equal(quadCorners({ ...quad, br: { x: 'x', y: 6 } }), null);
+});
+
+test('the file of a screen is named after the screen', () => {
+    assert.equal(screenFileName('Home Screen', 0), '01-home-screen.png');
+    assert.equal(screenFileName('Ünïcode!', 2), '03-n-code.png');
+    assert.equal(screenFileName('', 0), '01-screen.png');
+});
+
+test('the stage projects the corners itself when the role wrote no file', async () => {
+    const root = await workDirWith();
+    try {
+        const outDir = path.join(root, 'decomposition', 'rectified');
+        await mkdir(outDir, { recursive: true });
+        const written = await projectQuad({
+            source: path.join(root, 'decomposition', 'screens', '01-home.png'),
+            outDir,
+            label: 'home',
+            quad: { tl: { x: 20, y: 20 }, tr: { x: 300, y: 20 }, br: { x: 300, y: 220 }, bl: { x: 20, y: 220 } },
+            index: 0,
+            cwd: root,
+            engine: 'sharp',
+        });
+        assert.ok(written, 'the projection is written');
+        assert.equal(path.basename(written), '01-home.png');
+        assert.equal((await stat(written)).isFile(), true);
+        const frame = await sharp(written).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        assert.equal(frame.info.width > 0, true);
+        // A quad without corners cannot be projected.
+        assert.equal(await projectQuad({
+            source: path.join(root, 'decomposition', 'screens', '01-home.png'),
+            outDir,
+            label: 'home',
+            quad: null,
+            index: 0,
+            cwd: root,
+            engine: 'sharp',
+        }), null);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
 
 test('the rectifier role gets the projection tool and the output directory', async () => {
     const root = await workDirWith();
@@ -287,6 +342,100 @@ test('a collage becomes one screen per produced file', async () => {
     } finally {
         await rm(root, { recursive: true, force: true });
     }
+});
+
+// ---------------------------------------------------------------------------
+// The collage is cut out of the reference
+// ---------------------------------------------------------------------------
+
+/** A work dir with a reference and a crop the decompose stage made of it. */
+const collageDir = async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-rectify-collage-'));
+    await mkdir(path.join(root, 'decomposition', 'extended'), { recursive: true });
+    await mkdir(path.join(root, 'decomposition', 'screens'), { recursive: true });
+    await writeFile(path.join(root, REFERENCE_REL), await stripes(0));
+    await writeFile(path.join(root, SCREEN_REL), await stripes(0));
+    return root;
+};
+
+const collageState = (root, roles, overrides = {}) => stateFor(root, roles, {
+    images: [SCREEN_REL],
+    references: [REFERENCE_REL],
+    screens: [{ name: 'home', source: REFERENCE_REL, subReference: SCREEN_REL, subReferenceKind: 'crop' }],
+    screensFiles: [{
+        rel: SCREEN_REL, screen: 'home', kind: 'crop', source: REFERENCE_REL, note: '',
+    }],
+    ...overrides,
+});
+
+test('the reference is cut into screens and the crop of it is replaced', async () => {
+    const root = await collageDir();
+    try {
+        const rectDir = path.join(root, 'decomposition', RECTIFIED_DIR);
+        await mkdir(rectDir, { recursive: true });
+        await writeFile(path.join(rectDir, '01-a.png'), await stripes(0));
+        await writeFile(path.join(rectDir, '02-b.png'), await stripes(0));
+        const calls = [];
+        const state = collageState(root, mockRoles({
+            verdict: 'rectified',
+            assessment: 'three phones in one picture',
+            screens: [
+                { label: 'a', output: `decomposition/${RECTIFIED_DIR}/01-a.png`, quad: null },
+                { label: 'b', output: `decomposition/${RECTIFIED_DIR}/02-b.png`, quad: null },
+            ],
+        }, calls));
+        await runRectify(state, () => {});
+
+        assert.equal(calls.length, 1, 'the role is asked about the reference, not about the crop');
+        assert.match(calls[0].params.text, new RegExp(REFERENCE_REL.replace(/[/.]/g, '\\$&')));
+        assert.deepEqual(state.screens.map((screen) => screen.name), ['a', 'b']);
+        assert.deepEqual(state.images, [
+            `decomposition/${RECTIFIED_DIR}/01-a.png`,
+            `decomposition/${RECTIFIED_DIR}/02-b.png`,
+        ]);
+        // The crop is the screen the reference was cut from: it points at the same files.
+        const fromCrop = state.rectified.filter((item) => item.from === SCREEN_REL);
+        assert.equal(fromCrop.length, 2);
+        assert.deepEqual(fromCrop.map((item) => item.to), [
+            `decomposition/${RECTIFIED_DIR}/01-a.png`,
+            `decomposition/${RECTIFIED_DIR}/02-b.png`,
+        ]);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the crop is worked on when the reference cannot be cut', async () => {
+    const root = await collageDir();
+    try {
+        const rectDir = path.join(root, 'decomposition', RECTIFIED_DIR);
+        await mkdir(rectDir, { recursive: true });
+        await writeFile(path.join(rectDir, '01-home.png'), await stripes(0));
+        const calls = [];
+        const state = collageState(root, mockRoles([
+            { verdict: 'unresolved', assessment: 'cannot cut it', screens: [] },
+            { verdict: 'unresolved', assessment: 'cannot cut it', screens: [] },
+            { verdict: 'rectified', assessment: '', screens: [{ label: 'home', output: RECT_REL, quad: null }] },
+        ], calls));
+        await runRectify(state, () => {});
+        assert.ok(calls.length >= 2, 'the role is asked again');
+        assert.match(calls[calls.length - 1].params.text, new RegExp(SCREEN_REL.replace(/[/.]/g, '\\$&')));
+        assert.equal(state.screens[0].subReference, RECT_REL);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('a sub-reference that carries work of its own is not a crop of the reference', () => {
+    const references = [{ rel: 'decomposition/extended/app.png' }];
+    assert.equal(cropOfReference({ rel: 'a.png', kind: 'crop', source: 'decomposition/extended/app.png' }, references)?.rel,
+        'decomposition/extended/app.png');
+    assert.equal(cropOfReference({ rel: 'a.png', kind: 'crop', source: 'app.png' }, references)?.rel,
+        'decomposition/extended/app.png');
+    assert.equal(cropOfReference({ rel: 'a.png', kind: 'regenerated', source: 'decomposition/extended/app.png' }, references),
+        null);
+    assert.equal(cropOfReference({ rel: 'a.png', kind: 'crop', source: 'other.png' }, references), null);
+    assert.equal(cropOfReference(null, references), null);
 });
 
 // ---------------------------------------------------------------------------

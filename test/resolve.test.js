@@ -166,6 +166,50 @@ test('a screen without a file is reported and does not point at nothing', async 
     }
 });
 
+test('a screen that was cut into several files becomes several screens', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-resolve-split-'));
+    try {
+        const first = 'decomposition/rectified/01-a.png';
+        const second = 'decomposition/rectified/02-b.png';
+        for (const rel of [SCREEN_REL, first, second]) {
+            const abs = path.join(root, ...rel.split('/'));
+            await mkdir(path.dirname(abs), { recursive: true });
+            await writeFile(abs, await stripes());
+        }
+        const state = stateFor(root, mockRoles(null), {
+            rectified: [
+                { from: SCREEN_REL, to: first, screen: 'a' },
+                { from: SCREEN_REL, to: second, screen: 'b' },
+            ],
+            restored: [],
+            overlapResolved: [],
+        });
+        await runResolve(state, () => {});
+        const saved = JSON.parse(await readFile(path.join(root, 'decomposition.json'), 'utf8'));
+        assert.equal(saved.screens.length, 2, 'the collage is two screens, not one');
+        assert.deepEqual(saved.screens.map((screen) => screen.subReference), [first, second]);
+        assert.equal(saved.subReferences.length, 2);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the chain follows every branch of a picture that was cut', () => {
+    const chain = buildChain({
+        rectified: [
+            { from: SCREEN_REL, to: 'decomposition/rectified/01-a.png' },
+            { from: SCREEN_REL, to: 'decomposition/rectified/02-b.png' },
+        ],
+        restored: [{ from: 'decomposition/rectified/01-a.png', to: 'decomposition/restored/01-a.png' }],
+    });
+    const traced = followChain(SCREEN_REL, chain);
+    assert.deepEqual(traced.paths, [
+        'decomposition/restored/01-a.png',
+        'decomposition/rectified/02-b.png',
+    ]);
+    assert.deepEqual(traced.steps, ['rectify', 'reconstruct']);
+});
+
 test('without the advanced mode no layer is cut', async () => {
     const root = await workDirWith();
     try {

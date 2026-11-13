@@ -12,7 +12,7 @@
  *   The plain renderer is the same idea without the moving parts: it writes a line when
  *   the work changes, so a log of a piped run still shows the progress.
  *
- * @exports createRenderer, createPlainRenderer, detectMode, formatDuration
+ * @exports createRenderer, createPlainRenderer, detectMode, formatDuration, summaryLines
  * @ai.tags cli, renderer
  * @ai.hint keep
  */
@@ -81,6 +81,40 @@ function roleLine(event) {
 }
 
 /**
+ * The lines of the final summary of a run.
+ *
+ * The reader has to be able to answer three questions without opening a file: where the answer is,
+ * what is in it, and what went wrong. The summary says all three.
+ * @param {{ output?: object|null, outputPath?: string|null, warnings?: string[] }} result
+ * @returns {string[]}
+ * @exports
+ * @ai.hint pure
+ */
+export function summaryLines(result) {
+    const lines = [];
+    const output = result?.output ?? null;
+    const path = result?.outputPath ?? null;
+    if (path) lines.push(`output: ${path}`);
+    const screens = Array.isArray(output?.screens) ? output.screens : [];
+    const files = Array.isArray(output?.subReferences) ? output.subReferences : [];
+    lines.push(`screens: ${screens.length}`);
+    for (const screen of screens) {
+        const name = String(screen?.name ?? '').trim() || '(unnamed)';
+        const file = String(screen?.subReference ?? '').trim();
+        lines.push(`  - ${name}${file ? ` → ${file}` : ' → (no file)'}`);
+    }
+    const layers = Array.isArray(output?.layers) ? output.layers : [];
+    if (layers.length) lines.push(`layers: ${layers.length}`);
+    const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+    if (warnings.length) {
+        lines.push(`warnings: ${warnings.length}`);
+        for (const message of warnings.slice(0, 10)) lines.push(`  ! ${message}`);
+        if (warnings.length > 10) lines.push(`  ! …and ${warnings.length - 10} more`);
+    }
+    return lines;
+}
+
+/**
  * A renderer without colors, for a pipe.
  *
  * A run whose output is piped somewhere — a CI log, a file, another program — has to leave
@@ -138,8 +172,25 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'extend.attempt':
                 console.log(`[${stage || 'run'}] the picture model paints the band (attempt ${e.attempt}/${e.maxAttempts})`);
                 break;
+            case 'extend.decision':
+                if (e.verdict === 'keep') {
+                    console.log(`[${stage || 'run'}] the frame is complete: ${e.assessment ?? 'nothing is cut'}`);
+                } else {
+                    const edges = Array.isArray(e.edges) ? e.edges : [e.edge].filter(Boolean);
+                    console.log(`[${stage || 'run'}] the frame is cut at ${edges.join(' + ') || 'no edge'}`
+                        + `${e.band ? ` — the band is ${e.band} px` : ''}`
+                        + `${e.after ? `, the canvas grows to ${e.after.width}×${e.after.height}` : ''}`);
+                }
+                break;
             case 'extend.done':
-                if (verbose) console.log(`  extended: ${e.file} → ${e.to}`);
+                console.log(`  extended: ${e.file} → ${e.to} (${e.width}×${e.height})`);
+                break;
+            case 'decompose.cut':
+                console.log(`  cut: ${e.screen} → ${e.file}${e.existing ? ' (already there)' : ''}`);
+                break;
+            case 'decompose.screens':
+                console.log(`  screens: ${e.screens}, files: ${e.files}`
+                    + `${Array.isArray(e.names) && e.names.length ? ` (${e.names.join(', ')})` : ''}`);
                 break;
             case 'decompose.done':
                 console.log(`  screens: ${e.screens}, files: ${e.files}`);
@@ -150,8 +201,11 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'rectify.done':
                 console.log(`  rectified: ${e.count}`);
                 break;
+            case 'rectify.projected':
+                console.log(`  projected: ${e.file}${e.screen ? ` (${e.screen})` : ''}`);
+                break;
             case 'rectify.file':
-                if (verbose) console.log(`  rectified: ${e.file}`);
+                console.log(`  rectified: ${e.file}${e.screen ? ` (${e.screen})` : ''}`);
                 break;
             case 'reconstruct.file':
                 if (verbose) console.log(`  restored: ${e.file}`);
@@ -168,8 +222,11 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'resolve.layers':
                 if (verbose) console.log(`  layers: ${e.count}`);
                 break;
+            case 'resolve.json':
+                console.log(`  the decomposition is written: ${e.path} (${e.screens} screens)`);
+                break;
             case 'resolve.done':
-                console.log(`  output: ${e.path}`);
+                console.log(`  output: ${e.path} (${e.screens} screens, ${e.layers} layers)`);
                 break;
             case 'warning':
                 console.warn(`  warning: ${e.message}`);
@@ -201,7 +258,17 @@ export function createPlainRenderer({ verbose = false } = {}) {
         }
     }
 
-    return { event };
+    /**
+     * Print the final summary of the run.
+     * @param {object} result the result of the pipeline
+     * @returns {void}
+     */
+    function summary(result) {
+        console.log('Done.');
+        for (const line of summaryLines(result)) console.log(`  ${line}`);
+    }
+
+    return { event, summary };
 }
 
 /**
@@ -354,8 +421,25 @@ export function createRenderer({ verbose = false } = {}) {
             case 'transport.adjust':
                 say(paint(`  · ${e.reason}`, COLORS.dim));
                 break;
+            case 'extend.decision':
+                if (e.verdict === 'keep') {
+                    say(paint(`  · the frame is complete: ${e.assessment ?? 'nothing is cut'}`, COLORS.dim));
+                } else {
+                    const edges = Array.isArray(e.edges) ? e.edges : [e.edge].filter(Boolean);
+                    say(paint(`  · the frame is cut at ${edges.join(' + ') || 'no edge'}`
+                        + `${e.band ? ` — the band is ${e.band} px` : ''}`
+                        + `${e.after ? `, the canvas grows to ${e.after.width}×${e.after.height}` : ''}`, COLORS.dim));
+                }
+                break;
             case 'extend.done':
-                if (verbose) say(`  extended: ${e.file} → ${e.to}`);
+                say(paint(`  extended: ${e.file} → ${e.to} (${e.width}×${e.height})`, COLORS.dim));
+                break;
+            case 'decompose.cut':
+                say(paint(`  cut: ${e.screen} → ${e.file}${e.existing ? ' (already there)' : ''}`, COLORS.dim));
+                break;
+            case 'decompose.screens':
+                say(paint(`  screens: ${e.screens}, files: ${e.files}`
+                    + `${Array.isArray(e.names) && e.names.length ? ` (${e.names.join(', ')})` : ''}`, COLORS.dim));
                 break;
             case 'decompose.done':
                 say(paint(`  screens: ${e.screens}, files: ${e.files}`, COLORS.dim));
@@ -366,8 +450,11 @@ export function createRenderer({ verbose = false } = {}) {
             case 'rectify.done':
                 say(paint(`  rectified: ${e.count}`, COLORS.dim));
                 break;
+            case 'rectify.projected':
+                say(paint(`  projected: ${e.file}${e.screen ? ` (${e.screen})` : ''}`, COLORS.dim));
+                break;
             case 'rectify.file':
-                if (verbose) say(`  rectified: ${e.file}`);
+                say(paint(`  rectified: ${e.file}${e.screen ? ` (${e.screen})` : ''}`, COLORS.dim));
                 break;
             case 'reconstruct.file':
                 if (verbose) say(`  restored: ${e.file}`);
@@ -384,8 +471,11 @@ export function createRenderer({ verbose = false } = {}) {
             case 'resolve.layers':
                 if (verbose) say(`  layers: ${e.count}`);
                 break;
+            case 'resolve.json':
+                say(paint(`  the decomposition is written: ${e.path} (${e.screens} screens)`, COLORS.dim));
+                break;
             case 'resolve.done':
-                say(paint(`  output: ${e.path}`, COLORS.bold));
+                say(paint(`  output: ${e.path} (${e.screens} screens, ${e.layers} layers)`, COLORS.bold));
                 break;
             case 'warning':
                 say(paint(`  ⚠ ${e.message}`, COLORS.yellow));
@@ -418,5 +508,18 @@ export function createRenderer({ verbose = false } = {}) {
         }
     }
 
-    return { event };
+    /**
+     * Print the final summary of the run.
+     * @param {object} result the result of the pipeline
+     * @returns {void}
+     */
+    function summary(result) {
+        stopTicker();
+        console.log(paint('Done.', COLORS.bold));
+        for (const line of summaryLines(result)) {
+            console.log(paint(`  ${line}`, line.startsWith('!') ? COLORS.yellow : COLORS.dim));
+        }
+    }
+
+    return { event, summary };
 }

@@ -20,19 +20,25 @@ problem, and write the instruction for the band that would have to be grown.
 Look only for content clipped by the frame edge:
 - an element cut across — a row of keys, a list item, a card, an image, a button, a line of text;
 - a repeated structure that stops mid-repeat;
-- an interface that cannot be complete without the part outside the frame.
+- an interface that cannot be complete without the part outside the frame;
+- a device or a panel whose border runs past the edge of the picture.
+
+Check every one of the four edges before you answer: a picture is often cut at two sides at once —
+a device clipped at the top and another one clipped at the bottom. Report every edge that cuts
+content, in "edges".
 
 A frame that simply has background or empty space at the edge is complete.
-When nothing real is clipped, return verdict "keep" with an empty edge and an empty prompt.
+When nothing real is clipped, return verdict "keep" with an empty edge, an empty "edges" list and
+an empty prompt.
 
-When you do ask for an extension, name the single edge the content is clipped by.
+When you do ask for an extension, name the edges the content is clipped by.
 Write the prompt for the grown band only:
-- say what continues into the band, element by element;
+- say what continues into each band, element by element;
 - carry on the geometry: grid, pitch, corner radius, border weight, background colour;
 - carry on the type: same family, size, weight and colour;
 - forbid anything else: no new headlines, no new controls, no watermark.
 
 Never ask to change, redraw, move, resize, sharpen or restyle what is already inside the frame.
 
-Return the required JSON: verdict, assessment, edge, prompt.
+Return the required JSON: verdict, assessment, edge, edges, prompt.
 ${UNTRUSTED}`;

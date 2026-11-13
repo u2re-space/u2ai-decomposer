@@ -169,6 +169,69 @@ For a rectified or regenerated view, run compare_images against the source.`;
         });
         files = collected.files;
         collectedWarnings = collected.warnings;
+
+        // The role may name a screen and forget to write its file. The rectangle of the answer is
+        // enough for the harness to cut the pixels itself, so a screen of a collage is not lost
+        // because of one missing tool call.
+        const named = Array.isArray(result.data.screens) ? result.data.screens : [];
+        const missing = named.filter((screen) => {
+            const name = String(screen?.name ?? '').trim();
+            return name && !files.some((file) => file.screen === name);
+        });
+        if (missing.length) {
+            // A screen belongs to the reference it names; when it names none, it belongs to the
+            // first one.
+            const sourceOf = (screen) => {
+                const asked = String(screen?.source ?? '').trim().replace(/\\/g, '/');
+                if (!asked) return sources[0];
+                return sources.find((source) => (
+                    source.rel === asked
+                    || source.rel.endsWith(`/${asked}`)
+                    || asked.endsWith(source.rel)
+                )) ?? sources[0];
+            };
+            const groups = new Map();
+            for (const screen of missing) {
+                const source = sourceOf(screen);
+                if (!groups.has(source)) groups.set(source, []);
+                groups.get(source).push(screen);
+            }
+            for (const [source, screensOfSource] of groups) {
+                const planned = planScreens({
+                    decomposition: { screens: screensOfSource },
+                    frame: source.model,
+                    source: source.original,
+                    limits: settings,
+                });
+                // The file of a screen is named by its place in the whole answer, not by its place
+                // in the group of one reference.
+                const accepted = planned.accepted.map((item) => ({
+                    ...item,
+                    index: named.indexOf(item.screen),
+                }));
+                if (!accepted.length) continue;
+                const cut = await cropScreens({
+                    root,
+                    screensDir,
+                    source: source.abs,
+                    accepted,
+                    engine,
+                    skipExisting: true,
+                });
+                files = files.concat(cut.files);
+                collectedWarnings.push(...cut.warnings);
+                for (const file of cut.files) {
+                    notify({
+                        type: 'decompose.cut',
+                        screen: file.screen,
+                        file: file.rel,
+                        width: file.width,
+                        height: file.height,
+                        existing: file.note === 'the file was already there',
+                    });
+                }
+            }
+        }
     }
     warnings.push(...collectedWarnings);
 
@@ -179,13 +242,19 @@ For a rectified or regenerated view, run compare_images against the source.`;
         if (!file) return { ...screen, subReference: null, subReferenceKind: '' };
         return { ...screen, subReference: file.rel, subReferenceKind: file.kind || 'crop' };
     });
-    const subReferences = files.map((file) => ({
-        path: file.rel,
-        screen: file.screen,
-        kind: file.kind || 'crop',
-        source: file.source ?? '',
-        note: file.note ?? '',
-    }));
+    const subReferences = [];
+    const seenPaths = new Set();
+    for (const file of files) {
+        if (file.rel && seenPaths.has(file.rel)) continue;
+        if (file.rel) seenPaths.add(file.rel);
+        subReferences.push({
+            path: file.rel,
+            screen: file.screen,
+            kind: file.kind || 'crop',
+            source: file.source ?? '',
+            note: file.note ?? '',
+        });
+    }
     const decomposition = { ...result.data, screens, subReferences };
 
     state.decomposition = decomposition;
@@ -196,7 +265,16 @@ For a rectified or regenerated view, run compare_images against the source.`;
     const jsonPath = path.join(workRoot, 'decompose.json');
     await writeFile(jsonPath, JSON.stringify(decomposition, null, 2));
 
-    notify({ type: 'decompose.screens', screens: screens.length, files: files.length });
+    notify({
+        type: 'decompose.screens',
+        screens: screens.length,
+        files: files.length,
+        names: screens.map((screen) => String(screen?.name ?? '').trim()).filter(Boolean),
+        screenFiles: screens.map((screen) => ({
+            name: String(screen?.name ?? '').trim(),
+            file: screen?.subReference ?? null,
+        })),
+    });
     notify({ type: 'decompose.done', screens: screens.length, files: files.length });
     notify({ type: 'decompose.report', report: decompositionReport(decomposition, files, toPosix(path.relative(root, workRoot))) });
 }

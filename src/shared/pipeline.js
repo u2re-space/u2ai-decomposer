@@ -107,6 +107,10 @@ export async function runPipeline({
     const state = {
         root,
         images,
+        // The pictures the run started from. The stages replace `images` with their own files, but
+        // the reference stays: it is the ground truth of a collage, and the stage that cuts the
+        // collage works on it.
+        references: [...images],
         workDir,
         outDir,
         config,
@@ -133,7 +137,7 @@ export async function runPipeline({
 
     for (const connection of mcp) await connection.close().catch(() => {});
 
-    return { output: state.decomposition, warnings: state.warnings, failed };
+    return { output: state.decomposition, outputPath: state.outputPath ?? null, warnings: state.warnings, failed };
 }
 
 /**

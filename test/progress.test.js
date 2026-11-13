@@ -152,3 +152,54 @@ test('a stream that ends without the body of the response keeps its items', () =
     assert.equal(response.output.length, 1);
     assert.equal(response.output[0].content[0].text, 'ready');
 });
+
+test('the renderer says what every stage decided and produced', async () => {
+    const renderer = createPlainRenderer({ verbose: false });
+    const { out } = await capture(async () => {
+        renderer.event({
+            type: 'extend.decision',
+            verdict: 'extend',
+            edges: ['top', 'bottom'],
+            band: 128,
+            after: { width: 1024, height: 1024 },
+        });
+        renderer.event({ type: 'extend.done', file: 'app.png', to: 'decomposition/extended/app.png', width: 1024, height: 1024 });
+        renderer.event({ type: 'decompose.cut', screen: 'transfer', file: 'decomposition/screens/02-transfer.png' });
+        renderer.event({ type: 'decompose.screens', screens: 3, files: 3, names: ['home', 'transfer', 'articles'] });
+        renderer.event({ type: 'rectify.projected', file: 'decomposition/rectified/01-home.png', screen: 'home' });
+        renderer.event({ type: 'rectify.file', file: 'decomposition/rectified/02-transfer.png', screen: 'transfer' });
+        renderer.event({ type: 'resolve.json', path: 'C:/out/decomposition.json', screens: 3 });
+        renderer.event({ type: 'resolve.done', path: 'C:/out/decomposition.json', screens: 3, layers: 12 });
+    });
+    assert.match(out, /the frame is cut at top \+ bottom/);
+    assert.match(out, /extended: app\.png → decomposition\/extended\/app\.png/);
+    assert.match(out, /cut: transfer → decomposition\/screens\/02-transfer\.png/);
+    assert.match(out, /screens: 3, files: 3 \(home, transfer, articles\)/);
+    assert.match(out, /projected: decomposition\/rectified\/01-home\.png \(home\)/);
+    assert.match(out, /rectified: decomposition\/rectified\/02-transfer\.png \(transfer\)/);
+    assert.match(out, /output: C:\/out\/decomposition\.json \(3 screens, 12 layers\)/);
+});
+
+test('the final summary names the output and every screen', async () => {
+    const renderer = createPlainRenderer({ verbose: false });
+    const { out } = await capture(async () => {
+        renderer.summary({
+            output: {
+                screens: [
+                    { name: 'home', subReference: 'decomposition/screens/01-home.png' },
+                    { name: 'transfer', subReference: 'decomposition/screens/02-transfer.png' },
+                    { name: 'articles', subReference: null },
+                ],
+                subReferences: [],
+                layers: [],
+            },
+            outputPath: 'C:/out/decomposition.json',
+            warnings: ['decompose: screen articles was not cut'],
+        });
+    });
+    assert.match(out, /output: C:\/out\/decomposition\.json/);
+    assert.match(out, /screens: 3/);
+    assert.match(out, /- home → decomposition\/screens\/01-home\.png/);
+    assert.match(out, /- articles → \(no file\)/);
+    assert.match(out, /warnings: 1/);
+});
