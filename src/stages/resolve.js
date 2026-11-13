@@ -40,7 +40,8 @@ import { downscaleToMaxSide } from '../image/sizing.js';
 import { sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
 import {
-    SEEDREAM_MODEL, decomposeLayers, downloadImageBytes, isSeedream55, parseLayerDecomposition,
+    SEEDREAM_INPUT_MAX_BYTES, SEEDREAM_INPUT_MAX_PIXELS, SEEDREAM_MODEL, decomposeLayers,
+    downloadImageBytes, isSeedream55, parseLayerDecomposition,
 } from '../openai/seedream.js';
 
 /** Directory of the layer files, next to the decomposition JSON. */
@@ -316,6 +317,16 @@ async function splitLayersWithSeedream({ root, outDir, target, config, client, i
     const screenFrame = await rasterInfo(abs, { cwd: root, engine }).catch(() => null);
     if (!screenFrame?.width || !screenFrame?.height) {
         warnings.push(`resolve: cannot read the frame of ${target}`);
+        return { layers: [], frame: null, base: null };
+    }
+    // The vendor refuses an input of more than 30 MiB or 36 million pixels.
+    if (bytes.length > SEEDREAM_INPUT_MAX_BYTES) {
+        warnings.push(`resolve: ${target} is too big for the seedream split (${bytes.length} bytes)`);
+        return { layers: [], frame: null, base: null };
+    }
+    if (screenFrame.width * screenFrame.height > SEEDREAM_INPUT_MAX_PIXELS) {
+        warnings.push(`resolve: ${target} is too big for the seedream split `
+            + `(${screenFrame.width}x${screenFrame.height} pixels)`);
         return { layers: [], frame: null, base: null };
     }
 
