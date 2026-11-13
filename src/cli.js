@@ -7,13 +7,12 @@
  * @ai.tags cli, dispatch
  * @ai.hint keep
  */
-import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { loadConfig } from './config.js';
 import { createClient } from './openai/client.js';
-import { createRenderer, detectMode } from './cli/renderer.js';
+import { createRenderer, createPlainRenderer, detectMode } from './cli/renderer.js';
 import { HELP } from './help.js';
 import { runPipeline } from './shared/pipeline.js';
 
@@ -64,8 +63,11 @@ export function parseArgv(argv) {
     });
 
     const image = parsed.values.image ?? [];
-    const stages = parsed.values.stages ?? ['extend', 'decompose', 'rectify', 'reconstruct', 'overlap', 'resolve'];
-    const verbose = parsed.values.verbose !== false || parsed.values['no-verbose'] === true;
+    const stages = (parsed.values.stages ?? ['extend', 'decompose', 'rectify', 'reconstruct', 'overlap', 'resolve'])
+        .flatMap((value) => String(value).split(','))
+        .map((value) => value.trim())
+        .filter(Boolean);
+    const verbose = parsed.values.verbose === true && parsed.values['no-verbose'] !== true;
 
     return {
         image,
@@ -103,10 +105,11 @@ export async function main(argv = process.argv.slice(2)) {
     }
 
     const opts = parseArgv(argv);
-    const cwd = opts.config ? path.dirname(path.resolve(opts.config)) : process.cwd();
-    const config = await loadConfig({ configPath: opts.configPath, cwd });
+    const config = await loadConfig({ configPath: opts.configPath, cwd: process.cwd() });
     const isTTY = detectMode() === 'tty';
-    const renderer = isTTY ? createRenderer({ verbose: opts.verbose }) : null;
+    const renderer = isTTY
+        ? createRenderer({ verbose: opts.verbose })
+        : createPlainRenderer({ verbose: opts.verbose });
     const client = await createClient({ config, signal: null });
 
     try {
@@ -123,7 +126,7 @@ export async function main(argv = process.argv.slice(2)) {
             advanced: opts.advanced,
             stopAfter: opts.stopAfter,
             dryRun: opts.dryRun,
-            notify: renderer ? (event) => renderer.event(event) : () => {},
+            notify: (event) => renderer.event(event),
         });
         return 0;
     } catch (error) {

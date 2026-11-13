@@ -33,6 +33,16 @@ export const STAGES = [
     { id: 'resolve',     label: 'Resolve final output',  run: runResolve },
 ];
 
+/** The role each stage asks for its plan or its verdict. */
+const STAGE_ROLES = Object.freeze({
+    extend: 'extender',
+    decompose: 'decomposer',
+    rectify: 'rectifier',
+    reconstruct: 'restorer',
+    overlap: 'overlap',
+    resolve: 'director',
+});
+
 /**
  * Execute the pipeline stages in order.
  * @param {{
@@ -58,7 +68,7 @@ export async function runPipeline({
         }
     }
 
-    const mcp = await connectMcpServers(config?.mcp?.servers ?? []);
+    const mcp = dryRun ? [] : await connectMcpServers(config?.mcp?.servers ?? []);
 
     const roles = createRoleRunner({
         client,
@@ -70,13 +80,47 @@ export async function runPipeline({
         onEvent: (event) => notify({ type: 'api', ...event }),
     });
     const workDir = path.join(outDir, 'decomposition');
-    await mkdir(workDir, { recursive: true });
+    if (!dryRun) await mkdir(workDir, { recursive: true });
 
     // Filter stages to run.
-    const toRun = STAGES.filter((s) => requestedStages.includes(s.id));
+    const selected = requestedStages ?? STAGES.map((stage) => stage.id);
+    const toRun = STAGES.filter((stage) => (
+        selected.includes(stage.id)
+        && config?.stages?.[stage.id]?.enabled !== false
+    ));
     if (stopAfter) {
         const stopIdx = toRun.findIndex((s) => s.id === stopAfter);
         if (stopIdx >= 0) toRun.length = stopIdx + 1;
+    }
+
+    if (dryRun) {
+        const outputDirs = {
+            extend: 'extended',
+            decompose: 'screens',
+            rectify: 'rectified',
+            reconstruct: 'restored',
+            overlap: 'overlap',
+        };
+        const outputs = toRun.map((stage) => (
+            stage.id === 'resolve'
+                ? path.join(outDir, 'decomposition.json')
+                : path.join(workDir, outputDirs[stage.id] ?? stage.id)
+        ));
+        notify({
+            type: 'plan',
+            images,
+            stages: toRun.map((stage) => {
+                const role = roles.resolve(STAGE_ROLES[stage.id]);
+                return {
+                    id: stage.id,
+                    label: stage.label,
+                    model: role.model,
+                    imageModel: role.imageModel ?? imageModel ?? config?.imageModel ?? null,
+                };
+            }),
+            outputs,
+        });
+        return { output: null, warnings: [] };
     }
 
     // Shared state passed between stages.
@@ -93,6 +137,7 @@ export async function runPipeline({
         advanced,
         dryRun,
         extended: [],
+        canvas: [],
         screens: [],
         rectified: [],
         restored: [],
