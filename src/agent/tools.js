@@ -1,80 +1,86 @@
 /**
  * @file src/agent/tools.js
- * @purpose Tool registry and executor for image operations.
- * @exports createToolset, enabledToolNames
+ * @purpose The executor of the tools: it runs the calls the model asks for inside the working
+ *          directory and answers with a short text the model can read.
+ * @depends image/raster, openai/images, agent/tool-specs, agent/mcp
+ * @exports createToolset, toolSpecs, enabledToolNames
  * @ai.hint keep
  */
 import path from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { rasterCrop, rasterInfo, rasterCompare } from '../image/raster.js';
 import { sniffImage } from '../openai/images.js';
+import { toolSpecs as buildSpecs } from './tool-specs.js';
+
+export { toolSpecs, enabledToolNames } from './tool-specs.js';
 
 /**
- * Available tools for the decomposer domain.
+ * Turn a name into a token the API accepts.
+ * @param {string} value
+ * @returns {string}
+ * @ai.hint pure
  */
-const TOOL_DEFS = {
-    view_image: { description: 'View an image file', params: { path: { type: 'string' } } },
-    crop_image: { description: 'Crop a region from an image', params: { path: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, output: { type: 'string' } } },
-    split_image: { description: 'Split image into grid tiles', params: { path: { type: 'string' }, rows: { type: 'number' }, cols: { type: 'number' }, outputDir: { type: 'string' } } },
-    compare_images: { description: 'Compare two images pixel-by-pixel', params: { before: { type: 'string' }, after: { type: 'string' } } },
-    correct_perspective: { description: 'Apply perspective correction via quad corners', params: { path: { type: 'string' }, corners_json: { type: 'string' }, output: { type: 'string' } } },
-    generate_image: { description: 'Generate an image from prompt', params: { prompt: { type: 'string' }, reference: { type: 'string' }, output: { type: 'string' }, size: { type: 'string' } } },
-    edit_image: { description: 'Edit an image with a prompt', params: { image: { type: 'string' }, prompt: { type: 'string' }, output: { type: 'string' } } },
-    write_file: { description: 'Write content to a file', params: { path: { type: 'string' }, content: { type: 'string' } } },
-    read_file: { description: 'Read a file', params: { path: { type: 'string' } } },
-};
+function token(value) {
+    return String(value ?? '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
 
 /**
- * The tool definitions in the Responses API shape.
- * @param {object} [tools] the `tools` section of the config; a false value disables a tool
- * @returns {object[]}
+ * The tools of the connected MCP servers, named so that two servers cannot collide.
+ *
+ * @param {Array<{ name: string, tools: object[], call: Function }>} connections
+ * @returns {Array<{ name: string, description: string, parameters: object, connection: object, tool: string }>}
+ * @ai.hint pure
  */
-export function toolSpecs(tools = {}) {
+export function mcpToolEntries(connections = []) {
     const out = [];
-    for (const [name, def] of Object.entries(TOOL_DEFS)) {
-        if (tools?.[name] === false) continue;
-        out.push({
-            type: 'function',
-            name,
-            description: def.description,
-            parameters: {
-                type: 'object',
-                properties: def.params,
-                required: Object.keys(def.params).filter((key) => !['output', 'outputDir', 'size'].includes(key)),
-                additionalProperties: false,
-            },
-        });
+    for (const [index, connection] of (connections ?? []).entries()) {
+        const prefix = `mcp_${token(connection?.name ?? index)}`;
+        for (const tool of connection?.tools ?? []) {
+            if (!tool || typeof tool.name !== 'string') continue;
+            out.push({
+                name: `${prefix}_${token(tool.name)}`,
+                description: String(tool.description ?? ''),
+                parameters: tool.inputSchema && typeof tool.inputSchema === 'object'
+                    ? tool.inputSchema
+                    : { type: 'object', properties: {} },
+                connection,
+                tool: tool.name,
+            });
+        }
     }
     return out;
 }
 
-
-/**
- * Get enabled tool names for a role.
- * @param {object} tools config
- * @param {{ imageApi?: boolean }} [opts]
- * @returns {string[]}
- */
-export function enabledToolNames(tools, opts = {}) {
-    const names = [];
-    for (const [name, def] of Object.entries(TOOL_DEFS)) {
-        if (tools[name] === false) continue;
-        if (!opts.imageApi && ['generate_image', 'edit_image'].includes(name)) continue;
-        names.push(name);
-    }
-    return names;
-}
-
 /**
  * Create a toolset executor bound to a working directory.
- * @param {{ root: string, config: object, client?: object }} opts
+ *
+ * @param {{ root: string, config: object, client?: object, role?: string|null, mcp?: object[] }} opts
  * @returns {{ execute: (name: string, args: object) => Promise<string>, specs: object[] }}
  */
-export function createToolset({ root, config, client }) {
+export function createToolset({ root, config, client, role = null, mcp = [] }) {
     const engine = config.raster?.engine ?? 'auto';
-    const specs = toolSpecs(config?.tools);
+    const imageApi = Boolean(client?.images);
+    const mcpTools = mcpToolEntries(mcp);
+    const mcpSpecs = mcpTools.map((entry) => ({
+        type: 'function',
+        name: entry.name,
+        description: entry.description,
+        parameters: entry.parameters,
+    }));
+    const specs = [...buildSpecs(config?.tools, { role, imageApi }), ...mcpSpecs];
 
     async function execute(name, args) {
+        const mcpTool = mcpTools.find((entry) => entry.name === name);
+        if (mcpTool) {
+            const result = await mcpTool.connection.call(mcpTool.tool, args ?? {});
+            const content = Array.isArray(result?.content) ? result.content : null;
+            if (content) {
+                return content
+                    .map((part) => (typeof part?.text === 'string' ? part.text : JSON.stringify(part)))
+                    .join('\n');
+            }
+            return typeof result === 'string' ? result : JSON.stringify(result ?? null);
+        }
         switch (name) {
             case 'view_image': {
                 const abs = path.resolve(root, args.path);
@@ -166,5 +172,17 @@ export function createToolset({ root, config, client }) {
         }
     }
 
-    return { execute, specs };
+    return {
+        execute,
+        specs,
+        /** The tool list of one role: the catalogue, cut down to what that role may call. */
+        specsFor(role, names = null) {
+            const local = buildSpecs(config?.tools, { role, names, imageApi });
+            if (names) {
+                const wanted = new Set(names);
+                return [...local, ...mcpSpecs.filter((spec) => wanted.has(spec.name))];
+            }
+            return [...local, ...mcpSpecs];
+        },
+    };
 }

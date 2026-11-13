@@ -182,6 +182,13 @@ export const defaults = {
   /** Extra named roles merged into the role registry at load. */
   customRoles: {},
 
+  // --- MCP ------------------------------------------------------------------
+  /**
+   * External tool servers. Each entry is either `{ name, url }` for an HTTP
+   * server or `{ name, command, args }` for a server started over stdio.
+   */
+  mcp: { servers: [] },
+
   /** Output root for role skills (read-only skill packs per role). */
   skills: { dir: null },
 };

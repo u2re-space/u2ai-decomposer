@@ -98,10 +98,11 @@ export function resolveRole(config, name, { model = null, effort = null } = {}) 
  * The runner knows how to ask a role a question and how to read the answer: JSON when the
  * role has a schema, plain text otherwise. A tool loop is optional: when a toolset is given,
  * the calls the model asks for are executed and the answers are fed back.
- * @param {{ client: object, config?: object, model?: string|null, effort?: string|null, toolset?: object|null, onEvent?: Function|null }} opts
+ * @param {{ client: object, config?: object, model?: string|null, effort?: string|null, toolset?: object|null, skills?: object|null, onEvent?: Function|null }} opts
+ *   `skills` maps a role name to the text of its skill pack.
  * @returns {{ run: Function, resolve: Function }}
  */
-export function createRoleRunner({ client, config = {}, model = null, effort = null, toolset = null, onEvent = null } = {}) {
+export function createRoleRunner({ client, config = {}, model = null, effort = null, toolset = null, skills = null, onEvent = null } = {}) {
     /**
      * Run one role.
      * @param {string} name role name
@@ -113,7 +114,8 @@ export function createRoleRunner({ client, config = {}, model = null, effort = n
         maxTurns = 1, model: runModel = null, effort: runEffort = null, signal = null, extraTools = null,
     } = {}) {
         const role = resolveRole(config, name, { model: runModel ?? model, effort: runEffort ?? effort });
-        const roleInstructions = instructions ?? role.instructions;
+        const skillText = typeof skills?.[name] === 'string' ? skills[name].trim() : '';
+        const roleInstructions = [instructions ?? role.instructions, skillText].filter(Boolean).join('\n\n');
         if (!roleInstructions) {
             return {
                 status: 'error', data: null, text: '', toolCalls: [], usage: null,
@@ -121,7 +123,11 @@ export function createRoleRunner({ client, config = {}, model = null, effort = n
             };
         }
 
-        const tools = extraTools ?? (toolset?.specs ? toolset.specs : null);
+        const tools = extraTools ?? (
+            toolset?.specsFor
+                ? toolset.specsFor(name, role.tools ?? null)
+                : (toolset?.specs ?? null)
+        );
         const trace = [];
         const items = [];
         let last = null;

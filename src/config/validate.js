@@ -205,6 +205,17 @@ export function validateConfig(config) {
   }
 
   if (!isRecord(c.customRoles)) fail('customRoles должен быть объектом');
+  if (!isRecord(c.mcp)) fail('mcp должен быть объектом');
+  for (const key of Object.keys(c.mcp)) if (!(key in defaults.mcp)) fail(`mcp.${key}: неизвестное поле`);
+  if (!Array.isArray(c.mcp.servers)) fail('mcp.servers: массив серверов');
+  c.mcp.servers.forEach((server, index) => {
+    if (!isRecord(server)) fail(`mcp.servers[${index}]: объект`);
+    if (server.name != null && (typeof server.name !== 'string' || !server.name.trim())) fail(`mcp.servers[${index}].name: непустая строка или null`);
+    if (server.url != null && (typeof server.url !== 'string' || !server.url.trim())) fail(`mcp.servers[${index}].url: непустая строка или null`);
+    if (server.command != null && (typeof server.command !== 'string' || !server.command.trim())) fail(`mcp.servers[${index}].command: непустая строка или null`);
+    if (!server.url && !server.command) fail(`mcp.servers[${index}]: нужен url или command`);
+    if (server.args != null && !Array.isArray(server.args)) fail(`mcp.servers[${index}].args: массив строк или null`);
+  });
   if (c.skills != null) {
     if (!isRecord(c.skills)) fail('skills должен быть объектом');
     if (c.skills.dir !== null && (typeof c.skills.dir !== 'string' || !c.skills.dir.trim())) fail('skills.dir: путь или null');

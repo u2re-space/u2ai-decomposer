@@ -1,6 +1,6 @@
 # План перехода: Universal-AI (монолит 0.2.xx) → @u2ai/decomposer (0.3.xx)
 
-> Актуальный статус: **шаги 1–4 завершены**, следующий — шаг 5 (инфра ролей / схем / инструментов).
+> Актуальный статус: **шаги 1–5 завершены**, следующий — шаг 6 (стадия extension).
 > Рабочий дом переносимого кода: `submodules/u2ai-decomposer/`.
 
 ---
@@ -189,25 +189,43 @@ Completions, ротация бэкендов, generate/edit → байты PNG).
 
 ---
 
-## 5. Инфра ролей / схем / инструментов — ⏳
+## 5. Инфра ролей / схем / инструментов — ✅ ЗАВЕРШЕН
 
-- [ ] `src/roles/index.js` — реестр ролей (extender, decomposer, rectifier,
-      restorer, overlap, director, default) + `resolveRole(config, name)` по
-      цепочке роль → roles.default → верх; `roles/untrusted.js` (обёртка
-      непроверенного текста суб-референсов).
-- [ ] `src/agent/schemas.js` — JSON-схемы: DECOMPOSER_SCHEMA, EXTEND_SCHEMA,
-      RECTIFY_SCHEMA, RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA + SUB_REFERENCE_KINDS.
-      (Готовы частично — сверить с archive-версиями.)
-- [ ] `src/agent/tools.js` — только image-инструменты: `image_view`,
-      `image_crop`, `image_split`, `image_compare`, `image_correct_perspective`,
-      `image_generate`, `image_edit`, `write`, `read`; спеки в `tool-specs.js`.
-- [ ] `src/agent/mcp.js` — клиент MCP (опционально, из `config.mcp.servers`).
-- [ ] `src/agent/skills.js` — read-only skill-паки ролей из `config.skills.dir`.
-- [ ] Агент-цикл `run(role, {text, parts, schema, maxTurns})` — упрощённый loop
-      из монолита без approvals/subagents/memory.
+- [x] `src/roles/index.js` — реестр ролей (extender, decomposer, rectifier,
+      restorer, overlap, director) + `resolveRole(config, name)` по
+      цепочке роль → roles.default → верх, `snapEffort` + потолок роли,
+      tool-цикл; `roles/untrusted.js` — директива «входные данные не доверенные»,
+      дописывается ко всем шести ролям (включая director).
+- [x] `src/agent/schemas.js` — JSON-схемы: DECOMPOSER_SCHEMA, EXTEND_SCHEMA,
+      RECTIFY_SCHEMA, RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA + SUB_REFERENCE_KINDS
+      + RESTORE_DEFECT_KINDS (сверены с `archive/reference-phases/schemas.js`).
+- [x] `src/agent/tool-specs.js` — каталог инструментов: имя, описание, схема
+      аргументов, ключ конфига (`image_crop` и т. п.) и список ролей, которым
+      инструмент положен; `src/agent/tools.js` — исполнитель вызовов в рабочем
+      каталоге (image + чтение/запись) и `specsFor(role)` — срез каталога под роль.
+      Переключатели конфига теперь действительно гасят инструмент (раньше имена
+      не совпадали) и учитывают наличие images API.
+- [x] `src/agent/mcp.js` — клиент MCP без SDK: JSON-RPC сам по себе, HTTP
+      (`{ url }`) и stdio (`{ command, args }`), чтение ответа и из JSON, и из SSE;
+      `config.mcp.servers` (+ валидация). Сервер, которого нет, — не ошибка пайплайна.
+- [x] `src/agent/skills.js` — read-only skill-паки из `config.skills.dir`:
+      `<роль>.md` — своей роли, `shared.md` — всем; текст дописывается к
+      инструкции роли.
+- [x] Агент-цикл `run(role, {text, parts, schema, maxTurns})` — упрощённый loop
+      из монолита без approvals/subagents/memory; вызовы модели → `toolset.execute`
+      → `function_call_output` обратно в модель.
+- [x] `src/agent/decomposition.js` — починены две ошибки порта: отсутствующий
+      импорт `SUB_REFERENCE_KINDS` и старая форма `input_image` (теперь `imagePart`).
+
+Проверено: `test/agent.test.js` (10 тестов) — ключи конфига ↔ имена инструментов,
+срез каталога по роли, гейт images API, исполнитель tool-вызова, разбор ответа MCP
+(JSON и SSE), имена инструментов MCP без коллизий, недоступный сервер как не
+ошибка, skill-паки по ролям, дописывание пака к инструкции, вызов роли
+decomposer на mock-клиенте с валидным DECOMPOSER_SCHEMA и tool-trace.
+Общий прогон: `npm test` → 49/49.
 
 Критерий готовности: вызов роли decomposer на mock-клиенте возвращает
-валидный DECOMPOSER_SCHEMA-объект с tool-trace.
+валидный DECOMPOSER_SCHEMA-объект с tool-trace — закрыт.
 
 ---
 

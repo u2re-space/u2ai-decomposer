@@ -11,6 +11,8 @@ import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { createRoleRunner } from '../roles/index.js';
 import { createToolset } from '../agent/tools.js';
+import { loadSkills } from '../agent/skills.js';
+import { connectMcpServers } from '../agent/mcp.js';
 import { runExtension } from '../stages/extension.js';
 import { runDecompose } from '../stages/decompose.js';
 import { runRectify } from '../stages/rectify.js';
@@ -46,12 +48,25 @@ export async function runPipeline({
     config, client, model = null, effort = null, imageModel = null,
     advanced = false, stopAfter = null, dryRun = false, notify = () => {},
 }) {
+    const skills = {};
+    for (const role of ['extender', 'decomposer', 'rectifier', 'restorer', 'overlap', 'director']) {
+        const packs = await loadSkills({ dir: config?.skills?.dir ?? null, role });
+        if (packs.length) {
+            skills[role] = packs
+                .map((pack) => `## Skill pack: ${pack.name}\n${pack.content.trim()}`)
+                .join('\n\n');
+        }
+    }
+
+    const mcp = await connectMcpServers(config?.mcp?.servers ?? []);
+
     const roles = createRoleRunner({
         client,
         config,
         model,
         effort,
-        toolset: createToolset({ root, config, client }),
+        toolset: createToolset({ root, config, client, mcp }),
+        skills,
         onEvent: (event) => notify({ type: 'api', ...event }),
     });
     const workDir = path.join(outDir, 'decomposition');
@@ -99,6 +114,8 @@ export async function runPipeline({
         }
         notify({ type: 'stage.done', stage: stage.id });
     }
+
+    for (const connection of mcp) await connection.close().catch(() => {});
 
     return { output: state.decomposition, warnings: state.warnings };
 }

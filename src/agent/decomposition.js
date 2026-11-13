@@ -8,7 +8,9 @@
  * @ai.hint keep
  */
 import path from 'node:path';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { imagePart } from '../openai/responses.js';
+import { SUB_REFERENCE_KINDS } from './schemas.js';
 
 export const SUB_REFERENCE_DIR = 'decomposition';
 export const MAX_SUB_REFERENCES = 16;
@@ -101,10 +103,12 @@ export async function attachSubReferences({ root, files, maxBytes = null }) {
     const warnings = [];
     for (const file of files) {
         try {
-            const abs = file.abs;
-            const { readFile } = await import('node:fs/promises');
-            const bytes = await readFile(abs);
-            parts.push({ type: 'input_image', source: { type: 'image', data: bytes.toString('base64'), media_type: 'image/png' } });
+            const bytes = await readFile(file.abs);
+            if (maxBytes && bytes.length > maxBytes) {
+                warnings.push(`Sub-reference ${file.rel} exceeds limit (${bytes.length} bytes)`);
+                continue;
+            }
+            parts.push(imagePart(bytes, 'image/png'));
         } catch (error) {
             warnings.push(`Sub-reference ${file.rel} not attached: ${error.message}`);
         }

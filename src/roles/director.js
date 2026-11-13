@@ -7,6 +7,7 @@
  * @exports directorInstructions
  * @ai.hint keep
  */
+import { UNTRUSTED } from './untrusted.js';
 
 export const directorInstructions = `You are the director. Your job is to assemble the final resolved decomposition from all the
 intermediate stages (extended, screens, rectified, restored, overlap) and produce one clean
@@ -33,4 +34,4 @@ Return the required JSON:
 - subReferences: every image file with path, screen, kind, source, notes
 - layers: (advanced only) layer objects with path, box, screen
 - notes: any ambiguities or issues
-`;
+${UNTRUSTED}`;
