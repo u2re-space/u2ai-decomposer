@@ -23,11 +23,12 @@ Typical overlap cases:
 
 Compare every pair of screens. For each screen, identify regions that contain foreign content.
 Return one patch per overlap region:
+- screen: the name of the screen the region belongs to
 - kind: "overlap" (foreign element), "shared-frame" (device bezel), "shared-bg" (background bleed)
-- box in the screen's pixel coordinates
+- x, y, width, height: the box in the pixels of that screen
 - finding: what foreign content is present
 - prompt: instruction to remove or trim the foreign content
 
-Return the required JSON: verdict ("clean" or "overlap"), assessment, patches array with kind, box,
-finding, and prompt for each region.
+Return the required JSON: verdict ("clean" or "overlap"), assessment, patches array with screen, kind,
+x, y, width, height, finding, and prompt for each region.
 ${UNTRUSTED}`;

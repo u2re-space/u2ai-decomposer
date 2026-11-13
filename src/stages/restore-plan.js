@@ -83,23 +83,25 @@ export function planFragment(patch, { frameWidth, frameHeight, margin = FRAGMENT
  * rather than merged: two boxes over the same pixels ask the editor the same question twice, and the
  * second answer silently overwrites the first.
  * @param {object[]} patches the role's answer
- * @param {{ frameWidth: number, frameHeight: number, maxPatches?: number }} options
+ * @param {{ frameWidth: number, frameHeight: number, maxPatches?: number, kinds?: string[] }} options
+ *   `kinds` is the list of defect kinds this caller accepts.
  * @returns {{ patches: object[], rejected: Array<{ patch: object, reason: string }> }}
  * @ai.hint pure
  */
-export function pickPatches(patches = [], { frameWidth, frameHeight, maxPatches = 3 }) {
+export function pickPatches(patches = [], { frameWidth, frameHeight, maxPatches = 3, kinds = RESTORE_DEFECT_KINDS }) {
     const accepted = [];
     const rejected = [];
     const area = Math.max(1, frameWidth * frameHeight);
     for (const raw of patches) {
         const patch = {
+            screen: String(raw?.screen ?? '').trim(),
             kind: String(raw?.kind ?? '').trim(),
             x: Number(raw?.x), y: Number(raw?.y),
             width: Number(raw?.width), height: Number(raw?.height),
             finding: String(raw?.finding ?? '').trim(),
             prompt: String(raw?.prompt ?? '').trim(),
         };
-        if (!RESTORE_DEFECT_KINDS.includes(patch.kind)) {
+        if (!kinds.includes(patch.kind)) {
             rejected.push({ patch, reason: `the kind of defect "${patch.kind || '(empty)'}" is not in the list` });
             continue;
         }

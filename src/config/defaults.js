@@ -162,6 +162,10 @@ export const defaults = {
       enabled: true,
       /** Max AI erase attempts per overlapping element. */
       maxAttempts: 2,
+      /** Padding (px) around an overlap box before patching. */
+      boxPadding: 16,
+      /** Max regions of one screen that may be cleaned in one pass. */
+      maxPatches: 3,
     },
     resolve: {
       enabled: true,

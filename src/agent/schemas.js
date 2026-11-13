@@ -128,6 +128,28 @@ export const RECTIFY_SCHEMA = object({
 
 export const RESTORE_DEFECT_KINDS = ['leftover', 'missing', 'seam', 'artefact'];
 
+/** The kinds of foreign content the overlap role may report. */
+export const OVERLAP_DEFECT_KINDS = ['overlap', 'shared-frame', 'shared-bg'];
+
+export const OVERLAP_SCHEMA = object({
+    verdict: { type: 'string', enum: ['clean', 'overlap'], description: 'clean=every screen owns its content, overlap=foreign content was found.' },
+    assessment: { ...string, description: 'What the comparison of the screens showed.' },
+    patches: {
+        type: 'array',
+        description: 'One entry per region of foreign content.',
+        items: object({
+            screen: { ...string, description: 'The name of the screen the region belongs to.' },
+            kind: { type: 'string', enum: OVERLAP_DEFECT_KINDS, description: 'What the foreign content is.' },
+            x: { type: 'integer', description: 'Left edge in the pixels of that screen.' },
+            y: { type: 'integer', description: 'Top edge in the pixels of that screen.' },
+            width: { type: 'integer', description: 'Width of the region.' },
+            height: { type: 'integer', description: 'Height of the region.' },
+            finding: { ...string, description: 'What foreign content is present, stated as an observed fact.' },
+            prompt: { ...string, description: 'Instruction for the image editor.' },
+        }),
+    },
+});
+
 export const RESTORE_SCHEMA = object({
     verdict: { type: 'string', enum: ['clean', 'repair'], description: 'clean=usable, repair=needs fixes.' },
     assessment: { ...string, description: 'What you see and why.' },
