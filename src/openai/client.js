@@ -287,6 +287,28 @@ export async function createClient({ config, env = process.env, signal = null, o
     }
 
     /**
+     * Call one route on one backend, without the rotation.
+     * The channels below need it: a task id belongs to the host that created it.
+     * @param {object} backend
+     * @param {string} path route relative to the base URL
+     * @param {{ method?: string, body?: object, rawBody?: Buffer|string, contentType?: string, signal?: AbortSignal|null, stream?: boolean, onEvent?: Function|null, model?: string|null }} options
+     * @returns {Promise<object>}
+     * @ai.hint io
+     */
+    async function callBackend(backend, path, {
+        method = 'POST', body = null, rawBody = null, contentType = 'application/json',
+        signal: callSignal = null, stream = false, onEvent: callEvent = null, model = null,
+    } = {}) {
+        announce({ type: 'request.start', backend: backend.baseURL, path, model });
+        const { res } = await send(backend, path, {
+            method, body, rawBody, contentType, signal: callSignal, stream, onEvent: callEvent,
+        });
+        return stream
+            ? await readStream(res.body, { kind: stream === 'chat' ? 'chat' : 'responses', model, onEvent: callEvent })
+            : await readJson(res.body);
+    }
+
+    /**
      * Read a streamed answer and reduce it to the final response object.
      * @param {AsyncGenerator<Buffer>} body
      * @param {{ kind: 'responses'|'chat', model: string|null, onEvent?: Function|null }} options
@@ -327,14 +349,9 @@ export async function createClient({ config, env = process.env, signal = null, o
                 continue;
             }
             try {
-                announce({ type: 'request.start', backend: backend.baseURL, path, model });
-                const { res } = await send(backend, path, {
-                    method, body, rawBody, contentType, signal: callSignal, stream, onEvent: callEvent,
+                const answer = await callBackend(backend, path, {
+                    method, body, rawBody, contentType, signal: callSignal, stream, onEvent: callEvent, model,
                 });
-                const mime = String(res.headers['content-type'] ?? '').split(';', 1)[0].trim().toLowerCase();
-                const answer = stream
-                    ? await readStream(res.body, { kind: stream === 'chat' ? 'chat' : 'responses', model, onEvent: callEvent })
-                    : await readJson(res.body);
                 return answer;
             } catch (error) {
                 lastError = error;
@@ -545,6 +562,23 @@ export async function createClient({ config, env = process.env, signal = null, o
             async list({ signal: callSignal = null } = {}) {
                 return call('models', { method: 'GET', kind: 'text', signal: callSignal });
             },
+        },
+
+        /**
+         * The backends of one route kind as sticky channels.
+         *
+         * A channel talks to one host and never rotates, which is what an asynchronous task
+         * needs: the task id belongs to the host that created it, so the task is polled there.
+         * @param {'text'|'images'} kind
+         * @param {string|null} model the model the request names; a per-model list wins
+         * @returns {Array<{ label: string, baseURL: string, call: Function }>}
+         */
+        channels(kind = 'text', model = null) {
+            return resolveBackends(config, { kind, model, env }).map((backend) => ({
+                label: backend.baseURL,
+                baseURL: backend.baseURL,
+                call: (path, options = {}) => callBackend(backend, path, options),
+            }));
         },
 
         /**

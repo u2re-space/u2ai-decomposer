@@ -5,7 +5,7 @@
  *          last resort. Crops, box-patches, padding, trims, splits, alpha masks and SVG raster.
  * @depends node:path, node:fs/promises
  * @usedBy stages, agent/tools, image/skew
- * @exports rasterEngine, rasterInfo, rasterCompare, rasterApplyAlphaMask, rasterColorKeyAlpha, rasterLocalAlphaMatte, rasterDetectFakeTransparency, rasterCrop, rasterPatch, rasterTrim, rasterSplit, rasterPadImageBytes, rasterRemoveImagePadding, rasterFitToSourceFrame, rasterizeSvg, decodeRgba, encodeRgba, rasterScale, fitBox
+ * @exports rasterEngine, rasterInfo, rasterCompare, rasterApplyAlphaMask, rasterColorKeyAlpha, rasterLocalAlphaMatte, rasterDetectFakeTransparency, rasterCrop, rasterFitToBox, rasterPatch, rasterTrim, rasterSplit, rasterPadImageBytes, rasterRemoveImagePadding, rasterFitToSourceFrame, rasterizeSvg, decodeRgba, encodeRgba, rasterScale, fitBox
  * @ai.tags sharp, canvas, resvg, image, crop, svg
  * @ai.hint io
  * @ai.hint legacy-0.2
@@ -734,6 +734,46 @@ export async function rasterCrop({ input, output, x = 0, y = 0, width, height, c
     const png = await encodePng({ width: box.width, height: box.height, data }, engine);
     await writeFile(outAbs, png);
     return { rel: String(output).split(path.sep).join('/'), bytes: png.length, width: box.width, height: box.height };
+}
+
+/**
+ * Bring one layer file to the size of its box.
+ *
+ * The vendor scales every layer on its own to the chosen tier, so the file of a layer is not the
+ * frame of its box: "each layer is scaled separately at the chosen level, so the file size may
+ * differ from the bounding_box. When assembling, bring the layer to `w × h` and place it at
+ * `(x, y)`." The pixels of the layer file are therefore not the coordinates of the base.
+ *
+ * The resize is exact, because the layer canvas carries the aspect of its box; a file whose aspect
+ * differs from the box is reported, so a distortion never passes unnoticed.
+ * @param {{ input: string, output: string, width: number, height: number, cwd?: string, signal?: AbortSignal, engine?: 'auto'|'sharp'|'canvas' }} options
+ * @returns {Promise<{ rel: string, bytes: number, width: number, height: number, aspectDiff: number }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function rasterFitToBox({ input, output, width, height, cwd = process.cwd(), signal, engine = 'auto' }) {
+    const targetWidth = Math.max(1, Math.round(width));
+    const targetHeight = Math.max(1, Math.round(height));
+    const bytes = await readFile(toAbs(cwd, input));
+    signal?.throwIfAborted();
+    const frame = await decodeRgba(bytes, engine);
+    const aspectDiff = frame.height
+        ? Math.abs((frame.width / frame.height) - (targetWidth / targetHeight)) / (targetWidth / targetHeight)
+        : 0;
+    const scaled = frame.width === targetWidth && frame.height === targetHeight
+        ? frame
+        : await scaleRgba(frame, targetWidth, targetHeight, engine);
+    const png = await encodePng(scaled, engine);
+    const outAbs = toAbs(cwd, output);
+    await mkdir(path.dirname(outAbs), { recursive: true });
+    await writeFile(outAbs, png);
+    return {
+        rel: String(output).split(path.sep).join('/'),
+        bytes: png.length,
+        width: targetWidth,
+        height: targetHeight,
+        aspectDiff,
+    };
 }
 
 /**

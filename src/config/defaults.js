@@ -173,6 +173,14 @@ export const defaults = {
       layers: false,
       /** Max layers of one screen kept from the split. */
       maxLayers: 32,
+      /** Where the layers come from: auto | seedream | director. */
+      layerSource: 'auto',
+      /** The tier the seedream decomposition runs at: auto | 1K | 1.5K | 2K. */
+      layerSize: 'auto',
+      /** Ask the image model for the OCR of the text layers. */
+      textRecognition: true,
+      /** The prompt of the seedream decomposition (the tight-box wording by default). */
+      layerPrompt: null,
     },
   },
 

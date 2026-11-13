@@ -27,6 +27,10 @@ export const ENUMS = Object.freeze({
   /** Pipeline stages in execution order. */
   stages: Object.freeze(['extend', 'decompose', 'rectify', 'reconstruct', 'overlap', 'resolve']),
   decomposerModes: Object.freeze(['agent', 'inline']),
+  /** Where the layers of the advanced mode come from. */
+  layerSources: Object.freeze(['auto', 'seedream', 'director']),
+  /** The tiers the seedream decomposition accepts; ratios and pixel frames are refused. */
+  seedreamLayerSizes: Object.freeze(['auto', '1K', '1.5K', '2K']),
   rasterEngines: Object.freeze(['auto', 'sharp', 'canvas', 'magick']),
 });
 

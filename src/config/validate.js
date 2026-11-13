@@ -113,6 +113,18 @@ function validateStage(id, section, fail) {
     if ('maxLayers' in section && !(Number.isSafeInteger(section.maxLayers) && section.maxLayers >= 0)) {
       fail(`${where}.maxLayers: целое ≥ 0`);
     }
+    if ('layerSource' in section && !ENUMS.layerSources.includes(section.layerSource)) {
+      fail(`${where}.layerSource: ${ENUMS.layerSources.join(' | ')}`);
+    }
+    if ('layerSize' in section && !ENUMS.seedreamLayerSizes.includes(section.layerSize)) {
+      fail(`${where}.layerSize: ${ENUMS.seedreamLayerSizes.join(' | ')}`);
+    }
+    if ('textRecognition' in section && typeof section.textRecognition !== 'boolean') {
+      fail(`${where}.textRecognition: true | false`);
+    }
+    if ('layerPrompt' in section && section.layerPrompt != null && typeof section.layerPrompt !== 'string') {
+      fail(`${where}.layerPrompt: строка или null`);
+    }
   }
 }
 

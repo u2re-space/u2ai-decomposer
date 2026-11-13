@@ -8,6 +8,7 @@ export * from './openai/client.js';
 export * from './openai/errors.js';
 export * from './openai/responses.js';
 export * from './openai/images.js';
+export * from './openai/seedream.js';
 export * from './openai/fallback.js';
 export * from './openai/chat.js';
 export * from './config.js';

@@ -11,8 +11,10 @@ import os from 'node:os';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import sharp from 'sharp';
 
-import { buildChain, clampBox, followChain, layerSlug, runResolve } from '../src/stages/resolve.js';
+import { buildChain, clampBox, followChain, layerSlug, resolveLayerSource, runResolve } from '../src/stages/resolve.js';
 import { defaults, validateConfig } from '../src/config.js';
+
+const dataUri = (bytes) => `data:image/png;base64,${bytes.toString('base64')}`;
 
 const SCREEN_REL = 'decomposition/screens/01-home.png';
 const RECTIFIED_REL = 'decomposition/rectified/01-home.png';
@@ -242,4 +244,90 @@ test('the resolve section of the config accepts the layer limits', () => {
     assert.doesNotThrow(() => validateConfig(config));
     config.stages.resolve.maxLayers = 1.5;
     assert.throws(() => validateConfig(config), /maxLayers/);
+});
+
+// ---------------------------------------------------------------------------
+// The seedream layer split
+// ---------------------------------------------------------------------------
+
+test('the layers come from the image model when it is a seedream one', () => {
+    assert.equal(resolveLayerSource({ imageModel: 'seedream-5-5' }), 'seedream');
+    assert.equal(resolveLayerSource({ imageModel: 'bytedance-seed/seedream-5-5' }), 'seedream');
+    assert.equal(resolveLayerSource({ imageModel: 'vendor/painter' }), 'director');
+    assert.equal(resolveLayerSource({ config: { stages: { resolve: { layerSource: 'seedream' } } } }), 'seedream');
+    assert.equal(resolveLayerSource({ config: { stages: { resolve: { layerSource: 'director' } } }, imageModel: 'seedream-5-5' }), 'director');
+});
+
+test('the seedream split brings every layer to the size of its box', async () => {
+    const root = await workDirWith();
+    try {
+        const base = await stripes();
+        const layer = await sharp({
+            create: { width: 200, height: 100, channels: 4, background: { r: 9, g: 9, b: 9, alpha: 1 } },
+        }).png().toBuffer();
+        const answer = {
+            code: 200,
+            data: {
+                status: 'completed',
+                result: {
+                    images: [{
+                        url: [dataUri(base), dataUri(layer)],
+                        sizes: ['320x240', '200x100'],
+                        backgrounds: ['opaque', 'transparent'],
+                        layers: [
+                            { z_index: 0, background: 'opaque' },
+                            {
+                                z_index: 1,
+                                name: 'Nav logo',
+                                description: 'the logo of the page',
+                                background: 'transparent',
+                                bounding_box: { absolute: [10, 8, 130, 48], normalized: [31, 33, 406, 200] },
+                            },
+                        ],
+                    }],
+                },
+            },
+        };
+        const client = {
+            channels: () => [{
+                label: 'fake-host',
+                call: async (path) => (path === 'images/generations'
+                    ? { code: 200, data: [{ status: 'submitted', task_id: 'task-1' }] }
+                    : answer),
+            }],
+        };
+        const state = stateFor(root, mockRoles(null), { advanced: true, client, imageModel: 'seedream-5-5' });
+        const events = [];
+        await runResolve(state, (event) => events.push(event));
+
+        const saved = JSON.parse(await readFile(path.join(root, 'decomposition.json'), 'utf8'));
+        assert.equal(saved.layers.length, 1);
+        assert.equal(saved.layers[0].name, 'nav-logo');
+        assert.equal(saved.layers[0].path, 'layers/01-nav-logo.png');
+        assert.deepEqual(saved.layers[0].box, { x: 10, y: 8, width: 120, height: 40 });
+        assert.equal(saved.layerBase.path, 'layers/00-base.png');
+        assert.deepEqual(saved.layerFrame, { width: 320, height: 240 });
+
+        // The file of a layer is scaled on its own by the model: it is brought to the box.
+        const written = await sharp(path.join(root, 'layers', '01-nav-logo.png')).metadata();
+        assert.deepEqual([written.width, written.height], [120, 40]);
+        const baseFile = await sharp(path.join(root, 'layers', '00-base.png')).metadata();
+        assert.deepEqual([baseFile.width, baseFile.height], [320, 240]);
+        assert.equal(events.filter((event) => event.type === 'resolve.layers').length, 1);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the seedream split without an image backend says so instead of failing', async () => {
+    const root = await workDirWith();
+    try {
+        const state = stateFor(root, mockRoles(null), { advanced: true, imageModel: 'seedream-5-5' });
+        await runResolve(state, () => {});
+        assert.match(state.warnings.join('\n'), /no image backend/);
+        const saved = JSON.parse(await readFile(path.join(root, 'decomposition.json'), 'utf8'));
+        assert.deepEqual(saved.layers, []);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
 });

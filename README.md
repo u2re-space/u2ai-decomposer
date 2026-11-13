@@ -75,11 +75,27 @@ ai-decompose -i original.png --advanced --out ./output
 ### Image Layer (src/image/*.js)
 
 Sharp → Canvas → ImageMagick fallback chain:
-- `raster.js`: crop, patch, decodeRgba, pad, compare
+- `raster.js`: crop, patch, decodeRgba, pad, compare, fit-to-box
 - `rectify.js`: perspective correction, residual skew measurement
 - `magick.js`: ImageMagick wrapper
 - `padding.js`: canvas expansion
 - `canvas.js`: node-canvas abstraction
+
+### The layer split (advanced mode)
+
+`--advanced` splits one screen into layers. There are two sources:
+
+- `seedream` — the image model (`seedream-5-5`) splits the screen itself and answers with a base
+  picture and transparent PNG layers, each with a bounding box. The base is written to
+  `layers/00-base.png` and every layer to `layers/NN-<name>.png`. The model scales every layer on
+  its own to the chosen tier, so the file of a layer is not the frame of its box: each file is
+  brought to `w × h` of its box before it is written, and the box says where the layer belongs —
+  `(x, y)` over the base.
+- `director` — the text role names the layers with a box and the harness cuts those boxes out of
+  the pixels of the screen.
+
+`auto` (the default) picks `seedream` when the configured image model is a seedream one and
+`director` otherwise.
 
 ### Config
 
@@ -87,6 +103,17 @@ Sharp → Canvas → ImageMagick fallback chain:
 - Env prefix: `AI_DECOMPOSE_`
 - Substitutions: `{{env:NAME}}`
 - Backends and imagesBackends pools
+
+The section of the resolve stage:
+
+| Field | Meaning |
+|-------|---------|
+| `layers` | Emit `layers/` next to `decomposition.json` |
+| `maxLayers` | How many layers of one screen are kept |
+| `layerSource` | `auto` \| `seedream` \| `director` |
+| `layerSize` | The tier of the seedream decomposition: `auto` \| `1K` \| `1.5K` \| `2K` |
+| `textRecognition` | Ask the model for the OCR of the text layers |
+| `layerPrompt` | The prompt of the decomposition (the tight-box wording by default) |
 
 ## Lineage
 

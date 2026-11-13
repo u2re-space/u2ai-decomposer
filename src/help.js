@@ -21,7 +21,7 @@ Options:
   -m, --model <name>      AI model override.
   --image-model <name>    Image editing model override.
   --effort <level>        Reasoning effort: low | medium | high | xhigh.
-  --advanced              Enable advanced mode (layer split via seedream-5.5).
+  --advanced              Enable advanced mode (layer split: seedream-5.5 or the director role).
   --dry-run               Show what would be done without executing.
   --stop-after <stage>    Stop after this stage (inclusive).
   -v, --verbose           Verbose output.
