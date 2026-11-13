@@ -1,6 +1,6 @@
 # План перехода: Universal-AI (монолит 0.2.xx) → @u2ai/decomposer (0.3.xx)
 
-> Актуальный статус: **шаги 1–6 завершены**, следующий — шаг 7 (стадия decompose).
+> Актуальный статус: **шаги 1–7 завершены**, следующий — шаг 8 (стадия rectify).
 > Рабочий дом переносимого кода: `submodules/u2ai-decomposer/`.
 
 ---
@@ -252,12 +252,52 @@ decomposer на mock-клиенте с валидным DECOMPOSER_SCHEMA и too
 
 ---
 
-## 7. Стадия decompose (порт `roles/decomposer.js` + `decomposition.js`) — ⏳
+## 7. Стадия decompose (порт `roles/decomposer.js` + `decomposition.js`) — ✅ ЗАВЕРШЕН
 
-- [ ] Режимы `agent` (инструменты view/crop/split) и `inline` ( rects в JSON-ответе).
-- [ ] Роль называет экраны и кроит суб-референсы → `./decomposition/screens/`.
-- [ ] Caps: `maxSubReferences`, `maxRects`, `maxInlinePixels`, `minScreenSide`.
-- [ ] Запись decomposition-объекта в `state`.
+Два режима, один результат: экраны, файлы, на которые они указывают, и объект
+декомпозиции.
+
+**Режим `agent`** (по умолчанию): роль `decomposer` сама кроит экраны
+инструментами (`view_image`, `crop_image`, `split_image`, `compare_images`,
+`correct_perspective`, при наличии images API — `generate_image`/`edit_image`)
+и пишет их в `./decomposition/screens/`.
+
+**Режим `inline`**: роль не пишет ничего — она возвращает прямоугольник
+каждого экрана (`x`, `y`, `width`, `height` в пикселях картинки, которую видела
+модель), а harness сам режет пиксели. Экран в файле — это экран в исходнике,
+байт в байт; координаты переводятся из масштаба model-bound копии в пиксели
+исходника.
+
+- [x] Режимы `agent` (инструменты view/crop/split) и `inline` (rects в JSON-ответе):
+      `stages.decompose.mode` ∈ {`agent`, `inline`}, роль получает разные списки
+      инструментов (`AGENT_TOOLS` / `INLINE_TOOLS`); схема ответа — `DECOMPOSER_SCHEMA`
+      либо `DECOMPOSER_INLINE_SCHEMA`.
+- [x] Роль называет экраны и кроит суб-референсы → `./decomposition/screens/`;
+      пути в ответе и в состоянии — POSIX-relative от корня проекта.
+- [x] Caps: `maxSubReferences` (агент), `maxRects`, `maxInlinePixels`,
+      `minScreenSide` (inline); `stages.decompose.maxTurns` (по умолчанию 32)
+      ограничивает агентный tool-цикл.
+- [x] Запись decomposition-объекта в `state` (`state.decomposition`,
+      `state.screens`, `state.screensFiles`, `state.images`) и в
+      `<workDir>/decompose.json`.
+- [x] Песочница инструментов: `src/agent/paths.js` (`resolveInside`, `isInside`,
+      `toPosix`) — чтение и запись только внутри рабочего каталога, запись — только
+      в каталоги, открытые стадией (`toolset.setWriteDirs([<workDir>/screens])`);
+      `crop_image` обрезает рамку по пикселям кадра.
+- [x] `src/stages/decompose-screens.js` — планировщик прямоугольников
+      (`planScreens`) и резка (`cropScreens`), имя файла — порядок + slug.
+
+Проверено: `test/decompose.test.js` (18 тестов) — инструменты агентного режима и
+запрет инструментов записи в inline, сбор написанного файла, отказ пути вне
+рабочего каталога, кап числа суб-референсов, запрет записи вне открытого каталога,
+clamp рамки кропа, соответствие `minScreenSide`/`maxRects`/`maxInlinePixels`,
+перевод координат из картинки модели в исходник, резка inline-экрана с
+побайтовой сверкой пикселей, запись `decompose.json`, пустой state при ошибке
+роли, `maxTurns` и оба режима в валидаторе конфига.
+Общий прогон: `npm test` → 75/75.
+
+Критерий готовности: роль `decomposer` отдаёт декомпозицию, а каждый экран
+указывает на существующий файл в `./decomposition/screens/` — закрыт.
 
 ---
 

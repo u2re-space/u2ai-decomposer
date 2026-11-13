@@ -70,12 +70,16 @@ export async function runPipeline({
 
     const mcp = dryRun ? [] : await connectMcpServers(config?.mcp?.servers ?? []);
 
+    // One toolset for the whole run: the stages open the directories a role may write into, and
+    // the role runner executes the calls with the very same executor.
+    const toolset = createToolset({ root, config, client, mcp });
+
     const roles = createRoleRunner({
         client,
         config,
         model,
         effort,
-        toolset: createToolset({ root, config, client, mcp }),
+        toolset,
         skills,
         onEvent: (event) => notify({ type: 'api', ...event }),
     });
@@ -139,6 +143,8 @@ export async function runPipeline({
         extended: [],
         canvas: [],
         screens: [],
+        screensFiles: [],
+        toolset,
         rectified: [],
         restored: [],
         overlapResolved: [],

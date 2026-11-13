@@ -94,7 +94,7 @@ function validateStage(id, section, fail) {
   }
   if (id === 'decompose') {
     if (!ENUMS.decomposerModes.includes(section.mode)) fail(`${where}.mode: ${ENUMS.decomposerModes.join(' | ')}`);
-    for (const key of ['maxSubReferences', 'maxRects', 'maxInlinePixels', 'minScreenSide']) {
+    for (const key of ['maxTurns', 'maxSubReferences', 'maxRects', 'maxInlinePixels', 'minScreenSide']) {
       if (!(Number.isSafeInteger(section[key]) && section[key] > 0)) fail(`${where}.${key}: целое > 0`);
     }
   }

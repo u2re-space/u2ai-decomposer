@@ -35,7 +35,7 @@ export const DECOMPOSER_SCHEMA = object({
             bounds: { ...nullableString, description: 'Image coordinates or Figma frame bounds.' },
             references: { ...strings, description: 'Other screens or nodes related to this one.' },
             subReference: { ...nullableString, description: 'Path of the image produced for this screen.' },
-            subReferenceKind: { type: { enum: DECOMPOSER_KINDS, description: 'How this sub-reference was produced.' } },
+            subReferenceKind: { type: 'string', enum: DECOMPOSER_KINDS, description: 'How this sub-reference was produced.' },
         }),
     },
     subReferences: {
@@ -77,7 +77,7 @@ export const DECOMPOSER_INLINE_SCHEMA = object({
             references: { ...strings, description: 'Other screens or nodes related to this one.' },
             rect: { ...rect, description: 'The rectangle of the screen in the picture the model saw.' },
             subReference: { ...nullableString, description: 'Filled in by the harness with the file it cut.' },
-            subReferenceKind: { type: { enum: DECOMPOSER_KINDS, description: 'How this sub-reference was produced.' } },
+            subReferenceKind: { type: 'string', enum: DECOMPOSER_KINDS, description: 'How this sub-reference was produced.' },
         }),
     },
     subReferences: {

@@ -126,7 +126,9 @@ export const defaults = {
     decompose: {
       enabled: true,
       mode: ENUMS.decomposerModes[0],
-      /** Sub-references the agent stage may hand out per call. */
+      /** Max agent turns for the decomposer role. */
+      maxTurns: 32,
+      /** Sub-references the stage may keep per decomposition. */
       maxSubReferences: 12,
       /** Inline-mode caps: rects and pixels per request. */
       maxRects: 24,

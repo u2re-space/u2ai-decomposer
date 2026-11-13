@@ -62,6 +62,9 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'decompose.done':
                 console.log(`  screens: ${e.screens}, files: ${e.files}`);
                 break;
+            case 'decompose.report':
+                if (verbose) console.log(e.report);
+                break;
             case 'rectify.done':
                 console.log(`  rectified: ${e.count}`);
                 break;
@@ -114,6 +117,9 @@ export function createRenderer({ verbose = false } = {}) {
                 break;
             case 'decompose.done':
                 console.log(paint(`  screens: ${e.screens}, files: ${e.files}`, COLORS.dim));
+                break;
+            case 'decompose.report':
+                if (verbose) console.log(e.report);
                 break;
             case 'rectify.done':
                 console.log(paint(`  rectified: ${e.count}`, COLORS.dim));
