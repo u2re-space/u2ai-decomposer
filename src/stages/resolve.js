@@ -349,7 +349,10 @@ async function splitLayersWithSeedream({ root, outDir, target, config, client, i
     await mkdir(layersDir, { recursive: true });
 
     // The vendor counts the base among the outputs, so a request for N layers asks for N + 1.
-    const prompt = String(config?.stages?.resolve?.layerPrompt ?? '').trim() || TIGHT_BOX_PROMPT;
+    // A prompt of the config wins even when it is empty: with the OCR on, a prompt is known to
+    // cost the recognition, and an empty prompt is the way to ask for the text alone.
+    const asked = config?.stages?.resolve?.layerPrompt;
+    const prompt = typeof asked === 'string' ? asked.trim() : TIGHT_BOX_PROMPT;
     let decomposition;
     try {
         decomposition = await decomposeLayers({

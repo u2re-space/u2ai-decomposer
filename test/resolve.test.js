@@ -288,17 +288,28 @@ test('the seedream split brings every layer to the size of its box', async () =>
                 },
             },
         };
+        const bodies = [];
         const client = {
             channels: () => [{
                 label: 'fake-host',
-                call: async (path) => (path === 'images/generations'
-                    ? { code: 200, data: [{ status: 'submitted', task_id: 'task-1' }] }
-                    : answer),
+                call: async (path, options = {}) => {
+                    if (path === 'images/generations') bodies.push(options.body);
+                    return path === 'images/generations'
+                        ? { code: 200, data: [{ status: 'submitted', task_id: 'task-1' }] }
+                        : answer;
+                },
             }],
         };
         const state = stateFor(root, mockRoles(null), { advanced: true, client, imageModel: 'seedream-5-5' });
         const events = [];
         await runResolve(state, (event) => events.push(event));
+
+        assert.equal(bodies.length, 1);
+        assert.equal(bodies[0].model, 'seedream-5-5');
+        assert.equal(bodies[0].layer_decomposition, true);
+        assert.equal('background' in bodies[0], false);
+        assert.match(bodies[0].prompt, /tightest rectangle/);
+        assert.equal(bodies[0].layer_decomposition_options.text_recognition, true);
 
         const saved = JSON.parse(await readFile(path.join(root, 'decomposition.json'), 'utf8'));
         assert.equal(saved.layers.length, 1);
@@ -314,6 +325,31 @@ test('the seedream split brings every layer to the size of its box', async () =>
         const baseFile = await sharp(path.join(root, 'layers', '00-base.png')).metadata();
         assert.deepEqual([baseFile.width, baseFile.height], [320, 240]);
         assert.equal(events.filter((event) => event.type === 'resolve.layers').length, 1);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('an empty prompt of the config asks for the text alone', async () => {
+    const root = await workDirWith();
+    try {
+        const bodies = [];
+        const client = {
+            channels: () => [{
+                label: 'fake-host',
+                call: async (path, options = {}) => {
+                    if (path === 'images/generations') bodies.push(options.body);
+                    return path === 'images/generations'
+                        ? { code: 200, data: [{ status: 'submitted', task_id: 'task-1' }] }
+                        : { data: { status: 'completed', result: { images: [] } } };
+                },
+            }],
+        };
+        const state = stateFor(root, mockRoles(null), { advanced: true, client, imageModel: 'seedream-5-5' });
+        state.config.stages.resolve.layerPrompt = '';
+        await runResolve(state, () => {});
+        assert.equal(bodies.length, 1);
+        assert.equal('prompt' in bodies[0], false, 'with the OCR on, a prompt is known to cost the recognition');
     } finally {
         await rm(root, { recursive: true, force: true });
     }

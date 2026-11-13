@@ -113,7 +113,7 @@ The section of the resolve stage:
 | `layerSource` | `auto` \| `seedream` \| `director` |
 | `layerSize` | The tier of the seedream decomposition: `auto` \| `1K` \| `1.5K` \| `2K` |
 | `textRecognition` | Ask the model for the OCR of the text layers |
-| `layerPrompt` | The prompt of the decomposition (the tight-box wording by default) |
+| `layerPrompt` | The prompt of the decomposition (the tight-box wording by default; `""` sends no prompt) |
 
 ## Lineage
 
