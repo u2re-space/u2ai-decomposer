@@ -54,6 +54,21 @@ const growthPng = async (width, height, sourceHeight, source, band) => {
     return await sharp(data, { raw: { width, height, channels: 4 } }).png().toBuffer();
 };
 
+const growthRightPng = async (width, height, sourceWidth, source, band) => {
+    const data = Buffer.alloc(width * height * 4);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const fill = x < sourceWidth ? source : band;
+            const at = (y * width + x) * 4;
+            data[at] = fill[0];
+            data[at + 1] = fill[1];
+            data[at + 2] = fill[2];
+            data[at + 3] = 255;
+        }
+    }
+    return await sharp(data, { raw: { width, height, channels: 4 } }).png().toBuffer();
+};
+
 const stateFor = (root, roles, client) => ({
     root,
     images: ['mockup.png'],
@@ -137,6 +152,63 @@ test('the extension stage writes the grown band and keeps the source pixels', as
         assert.deepEqual(at(6, 1), [10, 20, 30, 255]);
         assert.deepEqual(at(6, 15), [10, 20, 30, 255]);
         assert.deepEqual(at(6, 16), [0, 128, 255, 255]);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the extension stage can grow the right edge', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-extend-right-'));
+    try {
+        await writeFile(path.join(root, 'mockup.png'), await sourcePng(16, 16, [10, 20, 30]));
+        const grown = await growthRightPng(32, 16, 16, [10, 20, 30], [0, 128, 255]);
+        const client = {
+            images: {
+                async edit() { return { images: [{ bytes: grown, mime: 'image/png' }] }; },
+            },
+        };
+        const state = stateFor(root, {
+            async run() {
+                return { ...plan, data: { ...plan.data, edge: 'right' } };
+            },
+        }, client);
+
+        await runExtension(state, () => {});
+
+        assert.equal(state.extended[0].kept, false);
+        const output = await readFile(path.join(root, state.extended[0].to));
+        const frame = await sharp(output).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        assert.deepEqual([frame.info.width, frame.info.height], [32, 16]);
+        const at = (x, y) => Array.from(frame.data.subarray((y * frame.info.width + x) * 4, (y * frame.info.width + x) * 4 + 4));
+        assert.deepEqual(at(13, 5), [10, 20, 30, 255]);
+        assert.deepEqual(at(16, 5), [0, 128, 255, 255]);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('a failed seam attempt is followed by a successful retry', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-extend-retry-'));
+    try {
+        await writeFile(path.join(root, 'mockup.png'), await sourcePng(32, 16, [10, 20, 30]));
+        const repainted = await sourcePng(32, 32, [200, 0, 0]);
+        const grown = await growthPng(32, 32, 16, [10, 20, 30], [0, 128, 255]);
+        let calls = 0;
+        const client = {
+            images: {
+                async edit() {
+                    calls += 1;
+                    return { images: [{ bytes: calls === 1 ? repainted : grown, mime: 'image/png' }] };
+                },
+            },
+        };
+        const state = stateFor(root, { async run() { return plan; } }, client);
+
+        await runExtension(state, () => {});
+
+        assert.equal(calls, 2);
+        assert.equal(state.extended[0].kept, false);
+        assert.equal(await stat(path.join(root, state.extended[0].to)).then(() => true), true);
     } finally {
         await rm(root, { recursive: true, force: true });
     }
