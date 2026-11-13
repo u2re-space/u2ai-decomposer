@@ -1,0 +1,25 @@
+/**
+ * @file src/index.js
+ * @module index
+ * @purpose Barrel re-export: everything the CLI and the public API use.
+ * @ai.hint keep
+ */
+export * from './openai/client.js';
+export * from './config.js';
+export * from './image/raster.js';
+export * from './image/magick.js';
+export * from './image/rectify.js';
+export * from './image/crop.js';
+export * from './image/padding.js';
+export * from './image/sizing.js';
+export * from './roles/index.js';
+export * from './agent/tools.js';
+export * from './agent/schemas.js';
+export * from './agent/decomposition.js';
+export * from './shared/pipeline.js';
+export * from './stages/extension.js';
+export * from './stages/decompose.js';
+export * from './stages/rectify.js';
+export * from './stages/reconstruct.js';
+export * from './stages/overlap.js';
+export * from './stages/resolve.js';

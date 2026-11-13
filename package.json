@@ -1,0 +1,50 @@
+{
+  "name": "@u2ai/decomposer",
+  "version": "0.3.0-alpha",
+  "description": "Multi-phase AI-agentic image decomposer and restorer: extend, decompose, rectify, restore, overlap, resolve.",
+  "type": "module",
+  "main": "./index.js",
+  "bin": {
+    "ai-decompose": "./bin/ai-decompose.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/u2re-space/u2ai-decomposer.git"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "start": "node bin/ai-decompose.js",
+    "test": "node --test --test-timeout=60000 \"test/*.test.js\""
+  },
+  "files": [
+    "bin",
+    "src",
+    "index.js",
+    "README.md"
+  ],
+  "keywords": [
+    "openai",
+    "responses-api",
+    "cli",
+    "decomposer",
+    "image-decomposition",
+    "perspective-rectify",
+    "image-restoration"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/node": "^2.1.1",
+    "@resvg/resvg-js": "^2.6.2",
+    "canvas": "^4.0.0-rc3",
+    "sharp": "^0.35.5"
+  },
+  "allowScripts": {
+    "canvas@3.2.3": true,
+    "canvas@4.0.0-rc3": true
+  }
+}
