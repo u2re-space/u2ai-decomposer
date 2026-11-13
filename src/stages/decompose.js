@@ -42,7 +42,7 @@ export async function runDecompose(state, notify = () => {}) {
         parts,
         instructions: ROLE_INSTRUCTIONS.decomposer,
         schema: DECOMPOSER_SCHEMA, schemaName: 'decomposition',
-        maxTurns: config.agent?.decomposerMaxTurns ?? 32,
+        maxTurns: config.stages?.decompose?.maxTurns ?? config.limits?.maxTurns ?? 32,
         model, effort,
     });
 

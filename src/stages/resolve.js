@@ -34,8 +34,8 @@ export async function runResolve(state, notify = () => {}) {
         layers: [],
     };
 
-    // Advanced: layer split.
-    if (advanced && config.agent?.decomposerMode === 'advanced') {
+    // Advanced: layer split (requested by --advanced or stages.resolve.layers).
+    if (advanced || config.stages?.resolve?.layers) {
         const layerTarget = resolved.screens[0]?.subReference;
         if (layerTarget) {
             try {
