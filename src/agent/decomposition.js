@@ -1,69 +1,97 @@
 /**
  * @file src/agent/decomposition.js
  * @module agent/decomposition
- * @purpose Collect sub-references produced by the decomposer, hand to measurer, render report.
- * @depends node:path, node:fs/promises
- * @exports SUB_REFERENCE_DIR, MAX_SUB_REFERENCES, collectSubReferences, attachSubReferences, decompositionReport
+ * @purpose Collect the sub-references the decomposer produced, attach them, render the report.
+ * @depends node:path, node:fs/promises, agent/paths, openai/responses, openai/images
+ * @exports SCREENS_DIR, MAX_SUB_REFERENCES, locateSubReference, collectSubReferences, attachSubReferences, decompositionReport
  * @ai.tags decomposition, images, measurement
  * @ai.hint keep
  */
 import path from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
 import { imagePart } from '../openai/responses.js';
-import { SUB_REFERENCE_KINDS } from './schemas.js';
+import { sniffImage } from '../openai/images.js';
+import { DECOMPOSER_KINDS } from './schemas.js';
+import { resolveInside, toPosix } from './paths.js';
 
-export const SUB_REFERENCE_DIR = 'decomposition';
+/** The directory of the work dir that holds the screens. */
+export const SCREENS_DIR = 'screens';
+
+/** The default number of sub-references one decomposition may keep. */
 export const MAX_SUB_REFERENCES = 16;
 
 /**
  * Locate one sub-reference path on disk.
+ *
+ * The model may answer with the path it wrote, with a path relative to the screens directory or
+ * with a bare file name; all three are tried. A path that leaves the working directory is refused.
  * @param {string} root project root
- * @param {string} rel cleaned path from decomposition
- * @param {string} workId working directory id
+ * @param {string} rel path from the decomposition answer
+ * @param {string} screensRel the screens directory, relative to the root
  * @returns {Promise<{ located: { abs: string, rel: string } | null, escapedRoot: boolean }>}
  */
-export async function locateSubReference(root, rel, workId) {
-    const prefix = `.tmp/${workId}/${SUB_REFERENCE_DIR}/`;
+export async function locateSubReference(root, rel, screensRel) {
     const candidates = [rel];
-    if (!rel.startsWith(`.tmp/${workId}/`)) candidates.push(`.tmp/${workId}/${rel}`);
-    if (!rel.startsWith(prefix)) candidates.push(prefix + rel.split('/').pop());
+    if (!rel.startsWith(`${screensRel}/`)) candidates.push(`${screensRel}/${rel}`);
+    candidates.push(`${screensRel}/${path.basename(rel)}`);
 
     let escapedRoot = false;
     const seen = new Set();
     for (const candidate of candidates) {
         if (seen.has(candidate)) continue;
         seen.add(candidate);
-        const abs = path.resolve(root, candidate);
-        const info = await stat(abs).catch(() => null);
-        if (info?.isFile()) return { located: { abs, rel: candidate }, escapedRoot: false };
+        let located = null;
+        try {
+            located = await resolveInside(root, candidate, { allowRoot: false });
+        } catch {
+            escapedRoot = true;
+            continue;
+        }
+        const info = await stat(located.abs).catch(() => null);
+        if (info?.isFile()) return { located: { abs: located.abs, rel: located.rel }, escapedRoot };
     }
     return { located: null, escapedRoot };
 }
 
 /**
- * Read sub-references from decomposition and keep images that exist.
- * @param {{ root: string, workId: string, decomposition: object, maxBytes?: number, maxFiles?: number }} opts
- * @returns {Promise<{ files: Array<{ rel: string, abs: string, bytes: number, screen: string, kind: string, source: string, note: string }>, warnings: string[] }>}
+ * Read the sub-references of a decomposition and keep the files that exist.
+ * @param {{ root: string, workDir: string, decomposition: object, maxBytes?: number|null,
+ *   maxFiles?: number }} opts
+ * @returns {Promise<{ files: Array<{ rel: string, abs: string, bytes: number, screen: string,
+ *   kind: string, source: string, note: string }>, warnings: string[] }>}
  */
-export async function collectSubReferences({ root, workId, decomposition, maxBytes = null, maxFiles = MAX_SUB_REFERENCES }) {
+export async function collectSubReferences({ root, workDir, decomposition, maxBytes = null, maxFiles = MAX_SUB_REFERENCES }) {
     const files = [];
     const warnings = [];
     const seen = new Set();
     const wanted = [];
+    const screensRel = toPosix(path.join(workDir, SCREENS_DIR));
 
     const listed = Array.isArray(decomposition?.subReferences) ? decomposition.subReferences : [];
     for (const entry of listed) {
         const rel = cleanPath(entry?.path);
         if (!rel) continue;
-        wanted.push({ rel, screen: String(entry?.screen ?? '').trim(), kind: kindOf(entry?.kind), source: String(entry?.source ?? '').trim(), note: String(entry?.note ?? '').trim() });
+        wanted.push({
+            rel,
+            screen: String(entry?.screen ?? '').trim(),
+            kind: kindOf(entry?.kind),
+            source: String(entry?.source ?? '').trim(),
+            note: String(entry?.note ?? '').trim(),
+        });
     }
 
     const screens = Array.isArray(decomposition?.screens) ? decomposition.screens : [];
     for (const screen of screens) {
         const rel = cleanPath(screen?.subReference);
         if (!rel) continue;
-        if (wanted.some((e) => e.rel === rel)) continue;
-        wanted.push({ rel, screen: String(screen?.name ?? '').trim(), kind: kindOf(screen?.subReferenceKind), source: '', note: '' });
+        if (wanted.some((entry) => entry.rel === rel)) continue;
+        wanted.push({
+            rel,
+            screen: String(screen?.name ?? '').trim(),
+            kind: kindOf(screen?.subReferenceKind),
+            source: String(screen?.source ?? '').trim(),
+            note: '',
+        });
     }
 
     for (const entry of wanted) {
@@ -73,9 +101,11 @@ export async function collectSubReferences({ root, workId, decomposition, maxByt
         }
         if (seen.has(entry.rel)) continue;
         seen.add(entry.rel);
-        const { located } = await locateSubReference(root, entry.rel, workId);
+        const { located, escapedRoot } = await locateSubReference(root, entry.rel, screensRel);
         if (!located) {
-            warnings.push(`Sub-reference not found: ${entry.rel}`);
+            warnings.push(escapedRoot
+                ? `Sub-reference is outside the working directory: ${entry.rel}`
+                : `Sub-reference not found: ${entry.rel}`);
             continue;
         }
         const info = await stat(located.abs).catch(() => null);
@@ -84,7 +114,7 @@ export async function collectSubReferences({ root, workId, decomposition, maxByt
             continue;
         }
         if (maxBytes && info.size > maxBytes) {
-            warnings.push(`Sub-reference ${entry.rel} exceeds limit (${info.size} bytes)`);
+            warnings.push(`Sub-reference ${located.rel} exceeds limit (${info.size} bytes)`);
             continue;
         }
         files.push({ ...entry, rel: located.rel, abs: located.abs, bytes: info.size });
@@ -95,10 +125,10 @@ export async function collectSubReferences({ root, workId, decomposition, maxByt
 
 /**
  * Attach collected sub-references for downstream roles.
- * @param {{ root: string, files: object[], maxBytes?: number }} opts
+ * @param {{ files: object[], maxBytes?: number|null }} opts
  * @returns {Promise<{ parts: object[], warnings: string[] }>}
  */
-export async function attachSubReferences({ root, files, maxBytes = null }) {
+export async function attachSubReferences({ files, maxBytes = null } = {}) {
     const parts = [];
     const warnings = [];
     for (const file of files) {
@@ -108,7 +138,7 @@ export async function attachSubReferences({ root, files, maxBytes = null }) {
                 warnings.push(`Sub-reference ${file.rel} exceeds limit (${bytes.length} bytes)`);
                 continue;
             }
-            parts.push(imagePart(bytes, 'image/png'));
+            parts.push(imagePart(bytes, sniffImage(bytes).mime));
         } catch (error) {
             warnings.push(`Sub-reference ${file.rel} not attached: ${error.message}`);
         }
@@ -117,10 +147,10 @@ export async function attachSubReferences({ root, files, maxBytes = null }) {
 }
 
 /**
- * Shared-context section for one decomposition.
+ * The section of the shared context that describes one decomposition.
  * @param {object} decomposition
  * @param {object[]} files collected sub-references
- * @param {string} dir project-relative work directory
+ * @param {string} dir the work directory, relative to the root
  * @returns {string}
  */
 export function decompositionReport(decomposition, files, dir) {
@@ -138,19 +168,30 @@ export function decompositionReport(decomposition, files, dir) {
     return [
         `Decomposition: ${decomposition?.summary || '(no summary)'}`,
         lines.join('\n'),
-        `Sub-references produced (${files.length}): ${files.map((f) => `${f.rel} [${f.kind}]`).join(', ')}`,
-        `Decomposition JSON: ${dir}/decomposition.json; images: ${dir}/${SUB_REFERENCE_DIR}/.`,
+        `Sub-references produced (${files.length}): ${files.map((file) => `${file.rel} [${file.kind}]`).join(', ')}`,
+        `Decomposition JSON: ${dir}/decomposition.json; images: ${dir}/${SCREENS_DIR}/.`,
     ].filter(Boolean).join('\n\n');
 }
 
-/** @returns {string|null} */
+/**
+ * Normalize a path the model answered with.
+ * @param {unknown} value
+ * @returns {string|null}
+ * @ai.hint pure
+ */
 function cleanPath(value) {
     const text = String(value ?? '').trim().replace(/[\\/]/g, '/').replace(/^\.\//, '');
     if (!text || /^https?:\/\//i.test(text) || /^data:/i.test(text)) return null;
     return text;
 }
 
-/** @returns {string} */
+/**
+ * Normalize a kind the model answered with.
+ * @param {unknown} value
+ * @returns {string}
+ * @ai.hint pure
+ */
 function kindOf(value) {
-    return SUB_REFERENCE_KINDS.includes(value) ? value : 'crop';
+    const text = String(value ?? '').trim();
+    return DECOMPOSER_KINDS.includes(text) ? text : 'crop';
 }

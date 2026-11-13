@@ -2,7 +2,7 @@
  * @file src/agent/schemas.js
  * @module agent/schemas
  * @purpose JSON schemas for AI role responses: decomposer, extender, rectifier, restorer.
- * @exports SUB_REFERENCE_KINDS, DECOMPOSER_SCHEMA, EXTEND_SCHEMA, RECTIFY_SCHEMA, RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA
+ * @exports SUB_REFERENCE_KINDS, DECOMPOSER_KINDS, DECOMPOSER_SCHEMA, DECOMPOSER_INLINE_SCHEMA, EXTEND_SCHEMA, RECTIFY_SCHEMA, RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA
  * @ai.tags schema
  * @ai.hint keep
  */
@@ -15,6 +15,12 @@ const nullableNumber = { type: ['number', 'null'] };
 const object = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
 
 export const SUB_REFERENCE_KINDS = ['crop', 'split', 'restored', 'repaired', 'regenerated', 'figma-export'];
+
+/**
+ * The kinds a sub-reference may carry. The empty kind means "the role did not say how it was
+ * produced" — a screen without a file has no kind at all.
+ */
+export const DECOMPOSER_KINDS = ['', ...SUB_REFERENCE_KINDS];
 
 export const DECOMPOSER_SCHEMA = object({
     summary: { ...string, description: 'How the provided design divides into screens or meaningful fragments.' },
@@ -29,7 +35,7 @@ export const DECOMPOSER_SCHEMA = object({
             bounds: { ...nullableString, description: 'Image coordinates or Figma frame bounds.' },
             references: { ...strings, description: 'Other screens or nodes related to this one.' },
             subReference: { ...nullableString, description: 'Path of the image produced for this screen.' },
-            subReferenceKind: { type: { enum: SUB_REFERENCE_KINDS, description: 'How this sub-reference was produced.' } },
+            subReferenceKind: { type: { enum: DECOMPOSER_KINDS, description: 'How this sub-reference was produced.' } },
         }),
     },
     subReferences: {
@@ -38,7 +44,49 @@ export const DECOMPOSER_SCHEMA = object({
         items: object({
             path: { ...string, description: 'Path of the image file.' },
             screen: { ...string, description: 'Screen this belongs to.' },
-            kind: { type: { enum: SUB_REFERENCE_KINDS, description: 'How this was produced.' } },
+            kind: { type: { enum: DECOMPOSER_KINDS, description: 'How this was produced.' } },
+            source: { ...string, description: 'Source reference.' },
+            note: { ...string, description: 'Notes about corrections or regeneration.' },
+        }),
+    },
+    notes: { ...strings, description: 'Ambiguities, inaccessible sources, or regeneration notes.' },
+});
+
+const rect = object({
+    x: { type: 'integer', description: 'Left edge of the screen in the pixels of the picture the model saw.' },
+    y: { type: 'integer', description: 'Top edge of the screen in the pixels of the picture the model saw.' },
+    width: { type: 'integer', description: 'Width of the screen in pixels.' },
+    height: { type: 'integer', description: 'Height of the screen in pixels.' },
+});
+
+/**
+ * The answer of the decomposer in inline mode: the same screens as in agent mode, but with the
+ * rectangle of every screen instead of a file. The harness cuts the pixels itself.
+ */
+export const DECOMPOSER_INLINE_SCHEMA = object({
+    summary: { ...string, description: 'How the provided design divides into screens or meaningful fragments.' },
+    screens: {
+        type: 'array',
+        description: 'Ordered screens or reusable sections.',
+        items: object({
+            name: { ...string, description: 'Short screen or fragment name.' },
+            source: { ...string, description: 'Source image path or Figma URL/node link.' },
+            nodeId: { ...nullableString, description: 'Figma node id when available.' },
+            purpose: { ...string, description: 'What this screen represents.' },
+            bounds: { ...nullableString, description: 'Image coordinates or Figma frame bounds.' },
+            references: { ...strings, description: 'Other screens or nodes related to this one.' },
+            rect: { ...rect, description: 'The rectangle of the screen in the picture the model saw.' },
+            subReference: { ...nullableString, description: 'Filled in by the harness with the file it cut.' },
+            subReferenceKind: { type: { enum: DECOMPOSER_KINDS, description: 'How this sub-reference was produced.' } },
+        }),
+    },
+    subReferences: {
+        type: 'array',
+        description: 'Empty in inline mode: the harness writes the files.',
+        items: object({
+            path: { ...string, description: 'Path of the image file.' },
+            screen: { ...string, description: 'Screen this belongs to.' },
+            kind: { type: { enum: DECOMPOSER_KINDS, description: 'How this was produced.' } },
             source: { ...string, description: 'Source reference.' },
             note: { ...string, description: 'Notes about corrections or regeneration.' },
         }),
