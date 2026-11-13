@@ -9,6 +9,7 @@
  *   pickPatches, editorPrompt
  * @ai.tags restoration, validation, fragments
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  *
  * Split out of the stage because the judgement "this box is not a targeted repair" decides whether
  * a generative call can damage a reference, and it has to be testable without an image API.

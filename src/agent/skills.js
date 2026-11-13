@@ -17,6 +17,7 @@
  * @exports loadSkills, skillsForRole
  * @ai.tags skills, prompts
  * @ai.hint io
+ * @ai.hint legacy-0.2
  */
 
 import path from 'node:path';

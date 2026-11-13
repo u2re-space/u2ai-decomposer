@@ -5,6 +5,7 @@
  * @depends image/raster, image/crop, openai/images, agent/tool-specs, agent/mcp, agent/paths
  * @exports createToolset, toolSpecs, enabledToolNames
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  */
 import path from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';

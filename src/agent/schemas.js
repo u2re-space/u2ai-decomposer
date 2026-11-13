@@ -5,6 +5,7 @@
  * @exports SUB_REFERENCE_KINDS, DECOMPOSER_KINDS, DECOMPOSER_SCHEMA, DECOMPOSER_INLINE_SCHEMA, EXTEND_SCHEMA, RECTIFY_SCHEMA, RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA
  * @ai.tags schema
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  */
 
 const string = { type: 'string' };

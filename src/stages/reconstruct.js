@@ -23,6 +23,7 @@
  * @exports runReconstruct, RESTORED_DIR
  * @ai.tags restoration, screens, fragments
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  */
 
 import path from 'node:path';

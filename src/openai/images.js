@@ -7,6 +7,7 @@
  * @exports IMAGE_SIZES, parseImageSize, formatSize, paddedSizeToMinPixels, sniffImage, readImageSize, imageSizeFields, resolveImageFormat, backgroundValue, encodeMultipart, imagePayloads, imageSources, imageModelFor
  * @ai.tags images
  * @ai.hint pure
+ * @ai.hint legacy-0.2
  */
 import { randomBytes } from 'node:crypto';
 

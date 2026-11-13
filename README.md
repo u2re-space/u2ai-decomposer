@@ -87,3 +87,25 @@ Sharp → Canvas → ImageMagick fallback chain:
 - Env prefix: `AI_DECOMPOSE_`
 - Substitutions: `{{env:NAME}}`
 - Backends and imagesBackends pools
+
+## Lineage
+
+The phases were ported from the monolith `Universal-AI` (0.2.xx), where they lived in
+`archive/reference-phases/` and failed inside the agent flow: an image editor has no stable contract
+for "grow this frame", the role refused to name the corners of a skewed photo, and the seam of a
+generative answer was never the source. Here they are the pipeline itself, each stage with its own
+role, its own directory and its own tests.
+
+The files that came from the monolith carry `@ai.hint legacy-0.2` in their header: the openai layer,
+the image layer, the agent layer, the roles and the three stages that grew out of the archived
+phases. The files written for this package do not.
+
+The monolith reaches this package through one command: `ai decompose` delegates to `ai-decompose`.
+
+```bash
+npm i -g @u2ai/decomposer     # or: AI_DECOMPOSE_BIN=/path/to/ai-decompose.js
+ai decompose --image collage.png
+```
+
+The monolith looks for the binary in `AI_DECOMPOSE_BIN`, in `submodules/u2ai-decomposer`, in
+`node_modules/@u2ai/decomposer` and in `PATH`.

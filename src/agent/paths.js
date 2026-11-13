@@ -7,6 +7,7 @@
  * @exports toPosix, isInside, resolveInside
  * @ai.tags paths, sandbox
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  */
 import path from 'node:path';
 import { lstat, realpath } from 'node:fs/promises';

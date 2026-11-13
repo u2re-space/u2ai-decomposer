@@ -12,6 +12,7 @@
  * @exports canvasLib, createCanvas, loadImage, canvasAvailable
  * @ai.tags canvas, image, engine, fallback
  * @ai.hint io
+ * @ai.hint legacy-0.2
  */
 
 /** Cached module handle. null = not tried yet, false = unavailable, object = the module. */

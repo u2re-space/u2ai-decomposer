@@ -6,6 +6,7 @@
  * @exports SCREENS_DIR, MAX_SUB_REFERENCES, locateSubReference, collectSubReferences, attachSubReferences, decompositionReport
  * @ai.tags decomposition, images, measurement
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  */
 import path from 'node:path';
 import { readFile, stat } from 'node:fs/promises';

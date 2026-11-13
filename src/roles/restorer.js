@@ -7,6 +7,7 @@
  * @exports restorerInstructions, restorerVerifyInstructions
  * @ai.tags roles, restoration, sub-reference
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  */
 import { UNTRUSTED } from './untrusted.js';
 

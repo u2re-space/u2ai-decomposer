@@ -14,6 +14,7 @@
  * @exports perspectiveRectify, measureResidualSkew, quadToRect, solveQuadError, CORNER_ORDER
  * @ai.tags images, perspective, rectify, skew
  * @ai.hint io
+ * @ai.hint legacy-0.2
  */
 
 export {

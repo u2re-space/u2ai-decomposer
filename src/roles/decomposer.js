@@ -6,6 +6,7 @@
  * @exports decomposerInstructions
  * @ai.tags roles, design, decomposition
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  */
 import { UNTRUSTED } from './untrusted.js';
 

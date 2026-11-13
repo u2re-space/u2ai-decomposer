@@ -9,6 +9,7 @@
  * @exports createClient, ApiError, retryDelayMs, resolveBackends
  * @ai.tags openai, client, api
  * @ai.hint io
+ * @ai.hint legacy-0.2
  */
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';

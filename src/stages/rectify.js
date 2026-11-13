@@ -20,6 +20,7 @@
  *   swapReferencePaths, RECTIFIED_DIR, MAX_RESIDUAL_DEG, MIN_IMPROVEMENT_DEG, RECTIFIER_TOOLS
  * @ai.tags rectification, perspective, screens
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  */
 
 import path from 'node:path';

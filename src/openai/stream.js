@@ -7,6 +7,7 @@
  * @exports createStreamReducer, outputText, refusalText, normalizeUsage
  * @ai.tags stream
  * @ai.hint hot
+ * @ai.hint legacy-0.2
  */
 import { ApiError } from './errors.js';
 

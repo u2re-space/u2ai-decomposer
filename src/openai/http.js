@@ -7,6 +7,7 @@
  * @exports createHttp, readBody, transientNetwork
  * @ai.tags http
  * @ai.hint io
+ * @ai.hint legacy-0.2
  */
 import http from 'node:http';
 import https from 'node:https';

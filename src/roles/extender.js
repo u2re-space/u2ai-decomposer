@@ -7,6 +7,7 @@
  * @exports extenderInstructions
  * @ai.tags roles, extension, outpainting
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  */
 import { UNTRUSTED } from './untrusted.js';
 

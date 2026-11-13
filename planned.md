@@ -1,6 +1,7 @@
 # План перехода: Universal-AI (монолит 0.2.xx) → @u2ai/decomposer (0.3.xx)
 
-> Актуальный статус: **шаги 1–13 завершены**, следующий — шаг 14 (затухание монолита).
+> Актуальный статус: **шаги 1–14 завершены** — переход сделан; дальше релиз 0.3.xx
+> и затухание монолита по факту релиза.
 > Рабочий дом переносимого кода: `submodules/u2ai-decomposer/`.
 
 ---
@@ -516,18 +517,41 @@ clamp рамки кропа, соответствие `minScreenSide`/`maxRects`
 
 ---
 
-## 14. Поэтапное затухание в монолите — ⏳
+## 14. Поэтапное затухание в монолите — ✅ ЗАВЕРШЁН
 
-- [ ] Каждый портированный `src/*` монолита помечать header-тегом
-      `@ai.hint legacy-0.2` по мере переноса (openai/*, image-утилиты,
-      roles/decomposer, agent/advanced).
-- [ ] Фазы `archive/reference-phases/{extend,rectify,restore}.js` остаются
-      эталоном до зелёных тестов шага 13, затем — только archive.
-- [ ] Обновить README монолита: `ai decompose` делегирует в `ai-decompose`.
-- [ ] Обновить `archive/reference-phases/README.md`: ссылка на новый дом фаз
+- [x] Каждый портированный `src/*` монолита помечен header-тегом
+      `@ai.hint legacy-0.2`: openai-слой (`chat`, `client`, `errors`, `fallback`,
+      `http`, `images`, `sse`, `stream`), image-слой (`raster`, `skew`, `distort`,
+      `magick`, `canvas`, `rectify`), agent-слой (`decomposition`, `mcp`, `paths`,
+      `schemas`, `skills`, `tool-specs`, `tools`), роли (`decomposer`, `untrusted`,
+      `extender`, `rectifier`, `restorer`) и три стадии, выросшие из архивных фаз
+      (`stages/extension`, `stages/rectify`, `stages/reconstruct`,
+      `stages/restore-plan`). Написанные для нового пакета файлы тега не имеют.
+- [x] Фазы `archive/reference-phases/{extend,rectify,restore}.js` остаются
+      эталоном до зелёных тестов шага 13, затем — только archive: шаг 13 закрыт,
+      README архива переписан (где фазы живут теперь и как их вернуть).
+- [x] README монолита: `ai decompose` делегирует в `ai-decompose` — описана
+      команда, поиск бинарника и то, что конфиг нового CLI свой
+      (`~/.ai-decompose/config.json`, `AI_DECOMPOSE_*`).
+- [x] Обновлён `archive/reference-phases/README.md`: ссылка на новый дом фаз
       (`submodules/u2ai-decomposer/src/stages/`).
-- [ ] В 0.2.xx удалять перенесённое только после релиза соответствующих
-      стадий в 0.3.xx.
+- [x] В монолите добавлена команда-мост: `src/commands/decompose.js` переводит
+      флаги монолита в флаги нового CLI (`--image`, `--out`, `--config`,
+      `--model`, `--effort`, `--image-model`, `--stop-after`, `--stages`,
+      `--dry-run`, `--advanced`), находит бинарник (`AI_DECOMPOSE_BIN` →
+      `submodules/u2ai-decomposer` → `node_modules/@u2ai/decomposer` → `PATH`)
+      и возвращает его exit-код. Команда зарегистрирована в `src/cli.js`, её флаги
+      добавлены в таблицу опций, справка — в `src/cli-help.js`.
+      Проверено: `test/decompose-command.test.js` (4 теста) в репозитории монолита.
+- [x] В 0.2.xx удалять перенесённое только после релиза соответствующих стадий
+      в 0.3.xx: в монолите ничего не удалено, фазы уже живут в архиве, а
+      мост только делегирует.
+
+Проверено: `npm test` в новом пакете → 153/153; `npm test` в монолите — зелёный
+(в том числе `test/decompose-command.test.js`).
+
+Критерий готовности: фазы живут в своём пакете, монолит на них ссылается и
+делегирует, архив помечен как архив — закрыт.
 
 ---
 

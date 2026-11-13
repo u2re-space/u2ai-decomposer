@@ -14,6 +14,7 @@
  * @exports connectMcp, connectMcpServers, mcpToolSpecs
  * @ai.tags mcp, tools, jsonrpc
  * @ai.hint io
+ * @ai.hint legacy-0.2
  */
 
 import { spawn } from 'node:child_process';

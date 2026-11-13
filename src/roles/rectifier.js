@@ -8,6 +8,7 @@
  * @exports rectifierInstructions
  * @ai.tags roles, rectification, perspective
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  */
 import { UNTRUSTED } from './untrusted.js';
 

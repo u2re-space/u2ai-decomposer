@@ -7,6 +7,7 @@
  * @exports parseSSE
  * @ai.tags sse
  * @ai.hint pure
+ * @ai.hint legacy-0.2
  */
 import { ApiError } from './errors.js';
 

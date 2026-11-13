@@ -16,6 +16,7 @@
  * @exports TOOL_SPECS, TOOL_NAMES, CONFIG_KEYS, toolSpecs, toolEnabled, configKeyFor
  * @ai.tags tools, specs, config
  * @ai.hint keep
+ * @ai.hint legacy-0.2
  */
 
 const str = (description) => ({ type: 'string', description });

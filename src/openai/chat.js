@@ -7,6 +7,7 @@
  * @exports CHAT_PATH, toChatBody, fromChatCompletion, normalizeChatResult, responsesRouteUnsupported, createChatStreamReducer, stripRejectedFields, droppedTools, chatGaps
  * @ai.tags chat, transport
  * @ai.hint pure
+ * @ai.hint legacy-0.2
  */
 import { ApiError } from './errors.js';
 

@@ -5,6 +5,7 @@
  * @exports fallbackChain, withModelFallback, fallbackModels
  * @ai.tags fallback
  * @ai.hint pure
+ * @ai.hint legacy-0.2
  */
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);

@@ -5,6 +5,7 @@
  * @exports ApiError, isAbortError
  * @ai.tags errors
  * @ai.hint pure
+ * @ai.hint legacy-0.2
  */
 
 /** Error raised for any failure while talking to the API. */
