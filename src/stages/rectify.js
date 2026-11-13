@@ -9,6 +9,8 @@ import { mkdir, readFile, stat, unlink } from 'node:fs/promises';
 import { RECTIFY_SCHEMA } from '../agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 import { rasterInfo } from '../image/raster.js';
+import { imagePart } from '../openai/responses.js';
+import { sniffImage } from '../openai/images.js';
 
 const RECTIFIED_DIR = 'rectified';
 const MAX_RESIDUAL_DEG = 0.8;
@@ -42,13 +44,13 @@ export async function runRectify(state, notify = () => {}) {
     for (const file of files) {
         const abs = file.abs ?? path.resolve(root, file.rel);
         let frame;
-        try { frame = await rasterInfo(abs, { cwd: root, engine: config.image?.rasterEngine ?? 'auto' }); }
+        try { frame = await rasterInfo(abs, { cwd: root, engine: config.raster?.engine ?? 'auto' }); }
         catch { warnings.push(`rectify: cannot read ${file.rel}`); continue; }
 
         const fileBytes = await readFile(abs);
         const result = await roles.run('rectifier', {
             text: `Reference: ${file.rel}\nSize: ${frame.width}×${frame.height}.\nWrite corrected files under ${workDir}/${RECTIFIED_DIR}/.\nSay whether this picture needs a projection.`,
-            parts: [{ type: 'input_image', source: { type: 'base64', data: fileBytes.toString('base64'), media_type: 'image/png' } }],
+            parts: [imagePart(fileBytes, sniffImage(fileBytes).mime)],
             instructions: ROLE_INSTRUCTIONS.rectifier,
             schema: RECTIFY_SCHEMA, schemaName: 'rectifyPlan',
             maxTurns: 6, model, effort,

@@ -1,9 +1,11 @@
 /**
  * @file src/roles/index.js
  * @module roles
- * @purpose Role registry and runner: resolves role by name, loads instructions, runs AI role.
- * @depends node:fs/promises
- * @exports createRoleRunner, ROLE_INSTRUCTIONS
+ * @purpose Role registry: instructions, model/effort resolution, and the run loop that talks
+ *          to the API.
+ * @depends openai/responses, model/profiles
+ * @usedBy shared/pipeline, stages
+ * @exports ROLE_INSTRUCTIONS, resolveRoleInstructions, resolveRole, createRoleRunner
  * @ai.tags roles
  * @ai.hint keep
  */
@@ -13,6 +15,8 @@ import { rectifierInstructions } from './rectifier.js';
 import { restorerInstructions } from './restorer.js';
 import { overlapInstructions } from './overlap.js';
 import { directorInstructions } from './director.js';
+import { parseResponse } from '../openai/responses.js';
+import { getModelProfile, snapEffort } from '../model/profiles.js';
 
 /**
  * Role instructions registry.
@@ -28,7 +32,7 @@ export const ROLE_INSTRUCTIONS = Object.freeze({
 });
 
 /**
- * Resolve role name to instruction string.
+ * Resolve a role name to its instruction text.
  * @param {string} name
  * @returns {string|null}
  */
@@ -36,63 +40,152 @@ export function resolveRoleInstructions(name) {
     return ROLE_INSTRUCTIONS[name] ?? null;
 }
 
+const textOf = (value) => (typeof value === 'string' ? value : '');
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
 /**
- * Create a role runner that calls the AI client.
- * @param {{ client: object }} opts
- * @returns {{ run: (name: string, params: object) => Promise<{ status: string, data: object|null, error: string|null, text: string }> }}
+ * Resolve a role into the settings of one call.
+ *
+ * The chain is role → `roles.default` → the top level of the config. The effort is clamped to
+ * what the model accepts and to the ceiling of the role.
+ * @param {object} config
+ * @param {string} name
+ * @param {{ model?: string|null, effort?: string|null }} [overrides] settings of this run
+ * @returns {{ name: string, model: string|null, effort: string|null, imageModel: string|null, instructions: string|null, tools: string[]|null, context: string|null }}
+ * @exports
  */
-export function createRoleRunner({ client }) {
-    /**
-     * Run an AI role.
-     * @param {string} name
-     * @param {{ text: string, parts?: object[], instructions?: string, schema?: object, schemaName?: string, maxTurns?: number, model?: string|null, effort?: string|null, signal?: AbortSignal }} params
-     * @returns {Promise<{ status: string, data: object|null, error: string|null, text: string }>}
-     */
-    async function run(name, { text, parts = [], instructions = null, schema = null, schemaName = null, maxTurns = 1, model = null, effort = null, signal = null }) {
-        const roleInstructions = instructions ?? ROLE_INSTRUCTIONS[name];
-        if (!roleInstructions) {
-            return { status: 'error', data: null, error: `Unknown role: ${name}`, text: '' };
+export function resolveRole(config, name, { model = null, effort = null } = {}) {
+    const roles = isRecord(config?.roles) ? config.roles : {};
+    const role = isRecord(roles[name]) ? roles[name] : {};
+    const fallback = isRecord(roles.default) ? roles.default : {};
+
+    const pick = (field) => {
+        for (const source of [role, fallback]) {
+            const value = source?.[field];
+            if (value !== undefined && value !== null && value !== '') return value;
         }
+        return null;
+    };
 
-        try {
-            // Build messages for the AI client.
-            const messages = [
-                { role: 'system', content: roleInstructions },
-                { role: 'user', content: text },
-            ];
+    const resolvedModel = model ?? pick('model') ?? textOf(config?.model) ?? null;
+    const profile = getModelProfile(resolvedModel, config);
 
-            // If parts (images) are provided, attach them.
-            const content = parts.length
-                ? [{ type: 'text', text }, ...parts]
-                : text;
-
-            const result = await client.responses.create({
-                model: model || null,
-                messages: [{ role: 'user', content }],
-                tools: schema ? [{ type: 'function', name: schemaName, function: { name: schemaName, description: schemaName, parameters: schema } }] : [],
-                max_turns: maxTurns,
-                signal,
-            });
-
-            // Parse JSON from the response.
-            const textContent = result.messages?.[0]?.content?.[0]?.text ?? '';
-            let data = null;
-            try {
-                data = JSON.parse(textContent);
-            } catch {
-                // Not JSON — return as text.
-            }
-
-            return {
-                status: result.status || 'completed',
-                data,
-                error: result.error || null,
-                text: textContent,
-            };
-        } catch (error) {
-            return { status: 'error', data: null, error: error.message, text: '' };
+    const wantedEffort = effort ?? pick('effort') ?? textOf(config?.reasoning?.effort) ?? null;
+    let resolvedEffort = snapEffort(wantedEffort, profile);
+    const maxEffort = pick('maxEffort');
+    if (maxEffort) {
+        const capped = snapEffort(maxEffort, profile);
+        if (capped && resolvedEffort) {
+            const order = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+            if (order.indexOf(resolvedEffort) > order.indexOf(capped)) resolvedEffort = capped;
         }
     }
 
-    return { run };
+    return {
+        name,
+        model: resolvedModel,
+        effort: resolvedEffort,
+        imageModel: pick('imageModel') ?? textOf(config?.imageModel) ?? null,
+        instructions: pick('instructions') ?? resolveRoleInstructions(name),
+        tools: Array.isArray(role?.tools) ? role.tools : null,
+        context: pick('context'),
+    };
+}
+
+/**
+ * Create a role runner bound to a client.
+ *
+ * The runner knows how to ask a role a question and how to read the answer: JSON when the
+ * role has a schema, plain text otherwise. A tool loop is optional: when a toolset is given,
+ * the calls the model asks for are executed and the answers are fed back.
+ * @param {{ client: object, config?: object, model?: string|null, effort?: string|null, toolset?: object|null, onEvent?: Function|null }} opts
+ * @returns {{ run: Function, resolve: Function }}
+ */
+export function createRoleRunner({ client, config = {}, model = null, effort = null, toolset = null, onEvent = null } = {}) {
+    /**
+     * Run one role.
+     * @param {string} name role name
+     * @param {{ text: string, parts?: object[], instructions?: string|null, schema?: object|null, schemaName?: string|null, maxTurns?: number, model?: string|null, effort?: string|null, signal?: AbortSignal|null, extraTools?: object[] }} [params]
+     * @returns {Promise<{ status: string, data: object|null, text: string, toolCalls: object[], usage: object|null, error: string|null, model: string|null, trace: object[] }>}
+     */
+    async function run(name, {
+        text = '', parts = [], instructions = null, schema = null, schemaName = null,
+        maxTurns = 1, model: runModel = null, effort: runEffort = null, signal = null, extraTools = null,
+    } = {}) {
+        const role = resolveRole(config, name, { model: runModel ?? model, effort: runEffort ?? effort });
+        const roleInstructions = instructions ?? role.instructions;
+        if (!roleInstructions) {
+            return {
+                status: 'error', data: null, text: '', toolCalls: [], usage: null,
+                error: `Unknown role: ${name}`, model: role.model, trace: [],
+            };
+        }
+
+        const tools = extraTools ?? (toolset?.specs ? toolset.specs : null);
+        const trace = [];
+        const items = [];
+        let last = null;
+
+        try {
+            const turns = Math.max(1, Number.isSafeInteger(maxTurns) ? maxTurns : 1);
+            for (let turn = 0; turn < turns; turn++) {
+                const answer = await client.responses.create({
+                    model: role.model,
+                    instructions: roleInstructions,
+                    input: turn === 0 ? text : items,
+                    parts: turn === 0 ? parts : null,
+                    tools,
+                    schema,
+                    schemaName: schemaName ?? 'response',
+                    effort: role.effort,
+                    signal,
+                    onEvent,
+                });
+                const parsed = parseResponse(answer);
+                last = parsed;
+                for (const call of parsed.toolCalls) trace.push({ tool: call.name, args: call.arguments });
+
+                if (!parsed.toolCalls.length || !toolset) break;
+
+                // Run the calls and feed the results back to the model.
+                for (const [index, call] of parsed.toolCalls.entries()) {
+                    const callId = call.callId ?? call.id ?? `call_${turn}_${index}`;
+                    let output = '';
+                    try {
+                        output = await toolset.execute(call.name, call.arguments);
+                    } catch (error) {
+                        output = `Tool error: ${error?.message ?? error}`;
+                    }
+                    items.push({ type: 'function_call', call_id: callId, name: call.name, arguments: call.raw });
+                    items.push({
+                        type: 'function_call_output',
+                        call_id: callId,
+                        output: textOf(output).slice(0, 20_000),
+                    });
+                }
+            }
+        } catch (error) {
+            return {
+                status: 'error', data: null, text: last?.text ?? '', toolCalls: last?.toolCalls ?? [],
+                usage: last?.usage ?? null, error: error?.message ?? String(error),
+                model: role.model, trace,
+            };
+        }
+
+        return {
+            status: last?.status ?? 'completed',
+            data: last?.data ?? null,
+            text: last?.text ?? '',
+            toolCalls: last?.toolCalls ?? [],
+            usage: last?.usage ?? null,
+            error: last?.error?.message ?? null,
+            model: last?.model ?? role.model,
+            trace,
+        };
+    }
+
+    return {
+        run,
+        resolve: (name, overrides = {}) => resolveRole(config, name, overrides),
+    };
 }

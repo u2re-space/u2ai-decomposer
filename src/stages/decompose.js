@@ -9,6 +9,8 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { DECOMPOSER_SCHEMA } from '../agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 import { collectSubReferences, decompositionReport } from '../agent/decomposition.js';
+import { imagePart } from '../openai/responses.js';
+import { sniffImage } from '../openai/images.js';
 
 /**
  * Run the decompose stage.
@@ -31,7 +33,7 @@ export async function runDecompose(state, notify = () => {}) {
         const abs = path.resolve(root, img);
         try {
             const bytes = await readFile(abs);
-            parts.push({ type: 'input_image', source: { type: 'base64', data: bytes.toString('base64'), media_type: 'image/png' } });
+            parts.push(imagePart(bytes, sniffImage(bytes).mime));
         } catch {
             warnings.push(`decompose: cannot read ${img}`);
         }

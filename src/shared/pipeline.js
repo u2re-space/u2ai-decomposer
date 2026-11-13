@@ -10,6 +10,7 @@
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { createRoleRunner } from '../roles/index.js';
+import { createToolset } from '../agent/tools.js';
 import { runExtension } from '../stages/extension.js';
 import { runDecompose } from '../stages/decompose.js';
 import { runRectify } from '../stages/rectify.js';
@@ -45,7 +46,14 @@ export async function runPipeline({
     config, client, model = null, effort = null, imageModel = null,
     advanced = false, stopAfter = null, dryRun = false, notify = () => {},
 }) {
-    const roles = createRoleRunner({ client });
+    const roles = createRoleRunner({
+        client,
+        config,
+        model,
+        effort,
+        toolset: createToolset({ root, config, client }),
+        onEvent: (event) => notify({ type: 'api', ...event }),
+    });
     const workDir = path.join(outDir, 'decomposition');
     await mkdir(workDir, { recursive: true });
 

@@ -5,13 +5,21 @@
  * @ai.hint keep
  */
 export * from './openai/client.js';
+export * from './openai/errors.js';
+export * from './openai/responses.js';
+export * from './openai/images.js';
+export * from './openai/fallback.js';
+export * from './openai/chat.js';
 export * from './config.js';
 export * from './image/raster.js';
 export * from './image/magick.js';
+export * from './image/skew.js';
+export * from './image/distort.js';
 export * from './image/rectify.js';
 export * from './image/crop.js';
 export * from './image/padding.js';
 export * from './image/sizing.js';
+export * from './model/profiles.js';
 export * from './roles/index.js';
 export * from './agent/tools.js';
 export * from './agent/schemas.js';

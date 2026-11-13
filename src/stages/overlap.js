@@ -9,6 +9,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 import { rasterCrop, rasterPatch, rasterInfo, decodeRgba } from '../image/raster.js';
 import { imageModelFor, sniffImage } from '../openai/images.js';
+import { imagePart } from '../openai/responses.js';
 
 const OVERLAP_DIR = 'overlap';
 
@@ -32,7 +33,7 @@ export async function runOverlap(state, notify = () => {}) {
         const abs = path.resolve(root, img);
         try {
             const bytes = await readFile(abs);
-            parts.push({ type: 'input_image', source: { type: 'base64', data: bytes.toString('base64'), media_type: sniffImage(bytes).mime } });
+            parts.push(imagePart(bytes, sniffImage(bytes).mime));
         } catch {}
     }
 
@@ -52,7 +53,7 @@ export async function runOverlap(state, notify = () => {}) {
     const patches = result.data.patches ?? [];
     for (const img of images) {
         const abs = path.resolve(root, img);
-        const frame = await rasterInfo(abs, { cwd: root, engine: config.image?.rasterEngine ?? 'auto' }).catch(() => null);
+        const frame = await rasterInfo(abs, { cwd: root, engine: config.raster?.engine ?? 'auto' }).catch(() => null);
         if (!frame) continue;
 
         let currentAbs = abs;
@@ -64,15 +65,15 @@ export async function runOverlap(state, notify = () => {}) {
                 const fragAbs = path.join(root, workDir, `.tmp-overlap-${i}.png`);
                 await rasterCrop({ input: currentAbs, output: fragAbs, ...box, cwd: root });
                 const fragBytes = await readFile(fragAbs);
-                const payloads = await client.images.edit({
+                const edited = await client.images.edit({
                     model: editorModel,
                     prompt: `${patch.prompt}\n\nThis is a fragment from one screen. Remove the foreign content and continue the screen's own background/style.`,
                     format: 'png',
-                    files: [{ filename: 'frag.png', mime: 'image/png', bytes: fragBytes }],
+                    image: { filename: 'frag.png', mime: 'image/png', bytes: fragBytes },
                 });
-                if (payloads?.length) {
+                if (edited?.images?.length) {
                     const editAbs = path.join(root, workDir, `.tmp-overlap-edit-${i}.png`);
-                    await writeFile(editAbs, Buffer.from(payloads[0], 'base64'));
+                    await writeFile(editAbs, edited.images[0].bytes);
                     const mergeAbs = path.join(outDir, path.basename(img));
                     await rasterPatch({ input: currentAbs, patch: editAbs, output: mergeAbs, ...box, cwd: root });
                     currentAbs = mergeAbs;

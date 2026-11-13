@@ -10,6 +10,7 @@ import { RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA } from '../agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 import { rasterCrop, rasterPatch, rasterInfo, decodeRgba } from '../image/raster.js';
 import { imageModelFor, sniffImage } from '../openai/images.js';
+import { imagePart } from '../openai/responses.js';
 
 const RESTORED_DIR = 'restored';
 const MAX_PATCH_COVERAGE = 0.45;
@@ -51,13 +52,13 @@ export async function runReconstruct(state, notify = () => {}) {
     const files = images.map((img) => ({ rel: img, abs: path.resolve(root, img) }));
 
     for (const file of files) {
-        const frame = await rasterInfo(file.abs, { cwd: root, engine: config.image?.rasterEngine ?? 'auto' }).catch(() => null);
+        const frame = await rasterInfo(file.abs, { cwd: root, engine: config.raster?.engine ?? 'auto' }).catch(() => null);
         if (!frame?.width) { warnings.push(`reconstruct: cannot read ${file.rel}`); continue; }
 
         const bytes = await readFile(file.abs);
         const result = await roles.run('restorer', {
             text: `Sub-reference: ${file.rel}\nSize: ${frame.width}×${frame.height}.\nName what blocks measurement.`,
-            parts: [{ type: 'input_image', source: { type: 'base64', data: bytes.toString('base64'), media_type: sniffImage(bytes).mime } }],
+            parts: [imagePart(bytes, sniffImage(bytes).mime)],
             instructions: ROLE_INSTRUCTIONS.restorer,
             schema: RESTORE_SCHEMA, schemaName: 'restorePlan', maxTurns: 1, model, effort,
         });
@@ -73,19 +74,19 @@ export async function runReconstruct(state, notify = () => {}) {
             const box = planFragment(patch, { frameWidth: frame.width, frameHeight: frame.height });
             try {
                 const fragAbs = path.join(root, workDir, `.tmp-frag-${i}.png`);
-                await rasterCrop({ input: currentAbs, output: fragAbs, ...box, cwd: root, engine: config.image?.rasterEngine });
+                await rasterCrop({ input: currentAbs, output: fragAbs, ...box, cwd: root, engine: config.raster?.engine });
                 const fragBytes = await readFile(fragAbs);
-                const payloads = await client.images.edit({
+                const edited = await client.images.edit({
                     model: editorModel,
                     prompt: `${patch.prompt}\n\nThe attached file is a fragment. Return same size, same scale, only the named thing changed.`,
                     format: 'png',
-                    files: [{ filename: `frag-${i}.png`, mime: 'image/png', bytes: fragBytes }],
+                    image: { filename: `frag-${i}.png`, mime: 'image/png', bytes: fragBytes },
                 });
-                if (payloads?.length) {
+                if (edited?.images?.length) {
                     const editAbs = path.join(root, workDir, `.tmp-edit-${i}.png`);
-                    await writeFile(editAbs, Buffer.from(payloads[0], 'base64'));
+                    await writeFile(editAbs, edited.images[0].bytes);
                     const mergeAbs = path.join(root, workDir, `.tmp-merge-${i}.png`);
-                    await rasterPatch({ input: currentAbs, patch: editAbs, output: mergeAbs, ...box, cwd: root, engine: config.image?.rasterEngine });
+                    await rasterPatch({ input: currentAbs, patch: editAbs, output: mergeAbs, ...box, cwd: root, engine: config.raster?.engine });
                     currentAbs = mergeAbs;
                     await unlink(fragAbs).catch(() => {});
                     await unlink(editAbs).catch(() => {});

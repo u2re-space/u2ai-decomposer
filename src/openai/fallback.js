@@ -1,38 +1,69 @@
 /**
  * @file src/openai/fallback.js
- * @purpose Multi-backend fallback: try channels in order when one fails.
- * @exports resolveBackend, tryFallback
- * @ai.hint keep
+ * @module openai/fallback
+ * @purpose Model fallback: a chain of models to try when one refuses or fails.
+ * @exports fallbackChain, withModelFallback, fallbackModels
+ * @ai.tags fallback
+ * @ai.hint pure
  */
 
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const textOf = (value) => (typeof value === 'string' ? value : '');
+
 /**
- * Pick the first backend that has a key configured.
+ * The models to try after the given one: the list under `fallback.models.<model>`, then the
+ * list under `fallback.models.*` (the catch-all chain).
  * @param {object} config
- * @returns {{ baseURL: string, apiKey: string }}
+ * @param {string|null} model
+ * @returns {string[]}
+ * @exports
  */
-export function resolveBackend(config) {
-    const backends = config?.backends ?? [];
-    for (const b of backends) {
-        const key = b.apiKey ?? '';
-        if (key && key !== '') return { baseURL: b.baseURL ?? b.baseUrl ?? '', apiKey: key };
-    }
-    return { baseURL: config?.baseURL ?? '', apiKey: config?.apiKey ?? '' };
+export function fallbackModels(config, model) {
+    if (config?.fallback?.enabled === false) return [];
+    const map = config?.fallback?.models;
+    if (!isRecord(map)) return [];
+    const pick = (list) => (Array.isArray(list)
+        ? list.map((item) => (typeof item === 'string' ? item : textOf(item?.model))).filter(Boolean)
+        : []);
+    const own = pick(map[model]);
+    const shared = pick(map['*']);
+    return [...own, ...shared.filter((item) => !own.includes(item))];
 }
 
 /**
- * Try a function across backends until one succeeds.
- * @param {Array<{baseURL:string,apiKey:string}>} backends
- * @param {(backend: object) => Promise<any>} fn
- * @returns {Promise<any>}
+ * The full chain of models for a request: the requested model first, then its fallbacks.
+ * @param {object} config
+ * @param {string|null} model
+ * @returns {string[]}
+ * @exports
  */
-export async function tryFallback(backends, fn) {
+export function fallbackChain(config, model) {
+    const chain = [];
+    if (model) chain.push(model);
+    for (const item of fallbackModels(config, model)) if (!chain.includes(item)) chain.push(item);
+    return chain;
+}
+
+/**
+ * Run a call with the model chain: the next model is tried when the call fails with an
+ * error that another model may survive (a refused request, an overload, a missing model).
+ * @param {{ config: object, model: string|null, call: (model: string|null) => Promise<any>, onTry?: Function|null }} params
+ * @returns {Promise<{ result: any, model: string|null, attempts: Array<{ model: string|null, error: string }> }>}
+ * @exports
+ */
+export async function withModelFallback({ config, model, call, onTry = null }) {
+    const chain = fallbackChain(config, model);
+    const attempts = [];
     let lastError = null;
-    for (const backend of backends) {
+    for (const candidate of chain) {
         try {
-            return await fn(backend);
-        } catch (e) {
-            lastError = e;
+            onTry?.({ model: candidate, attempt: attempts.length + 1 });
+            const result = await call(candidate);
+            return { result, model: candidate, attempts };
+        } catch (error) {
+            lastError = error;
+            attempts.push({ model: candidate, error: error?.message ?? String(error) });
         }
     }
-    throw lastError ?? new Error('No backends available');
+    throw lastError ?? new Error('No model answered the request.');
 }

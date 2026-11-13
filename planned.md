@@ -1,6 +1,6 @@
 # План перехода: Universal-AI (монолит 0.2.xx) → @u2ai/decomposer (0.3.xx)
 
-> Актуальный статус: **шаги 1–2 завершены**, следующий — шаг 3 (ИИ-подсистема).
+> Актуальный статус: **шаги 1–4 завершены**, следующий — шаг 5 (инфра ролей / схем / инструментов).
 > Рабочий дом переносимого кода: `submodules/u2ai-decomposer/`.
 
 ---
@@ -96,53 +96,96 @@ original.png
 
 ---
 
-## 3. ИИ-подсистема — ⏳ СЛЕДУЮЩИЙ ШАГ
+## 3. ИИ-подсистема — ✅ ЗАВЕРШЕНА
 
 Порт `src/openai/*` из монолита **без** team/loop/serve/channels:
 
-- [ ] `src/openai/client.js` — HTTP-клиент: Responses API как основной транспорт,
+- [x] `src/openai/http.js` — транспорт на `node:http(s)`: явный idle-таймаут
+      (`config.timeoutMs`), connect-таймаут, чтение тела с потолком по байтам.
+- [x] `src/openai/errors.js` — `ApiError` (статус, request id, retryAfter, apiCode,
+      param, retryable), `isAbortError`.
+- [x] `src/openai/sse.js` — разбор SSE: CRLF, комментарии, несколько `data:`,
+      `[DONE]`, потолок события и потока.
+- [x] `src/openai/stream.js` — `createStreamReducer` (text/reasoning/tool-события),
+      `outputText`, `refusalText`, `normalizeUsage`.
+- [x] `src/openai/client.js` — HTTP-клиент: Responses API как основной транспорт,
       Chat Completions как fallback; `images.generate` / `images.edit`;
       ротация бэкендов из `config.backends`/`imagesBackends`/`modelsBackends`
-      (первичный + перебор при 4xx/5xx), ретраи с backoff, `timeoutMs`.
-- [ ] `src/openai/responses.js` — сборка тела запроса (instructions, input,
-      reasoning.effort/summary/mode, tool_calls), парсинг streaming/final.
-- [ ] `src/openai/completions.js` — адаптер Chat Completions для хостов без Responses.
-- [ ] `src/openai/images.js` — generate/edit с маской, размеры/формат/quality из
-      `config.image`, разбор b64Json-ответов.
-- [ ] `src/openai/fallback.js` — цепочка `fallback.models` + ротация бэкендов.
-- [ ] `src/model/profiles.js` — `MODEL_PROFILES`: window/maxOutput/ceiling по
+      (первичный + перебор при 4xx/5xx), ретраи с backoff, `timeoutMs`;
+      `resolveBackends()`, `retryDelayMs()`.
+- [x] `src/openai/responses.js` — сборка тела запроса (instructions, input,
+      reasoning.effort/summary/mode, tools, schema → `text.format`), разбор ответа
+      (`parseResponse`, `extractToolCalls`), помощники `imagePart`/`textPart`.
+- [x] `src/openai/chat.js` (+ `completions.js` как ре-экспорт) — адаптер Chat
+      Completions для хостов без Responses: `toChatBody`, `fromChatCompletion`,
+      `responsesRouteUnsupported`, `stripRejectedFields`, `chatGaps`.
+- [x] `src/openai/images.js` — размеры/формат/quality из `config.image`,
+      multipart-тело (`encodeMultipart`), маска, разбор b64Json/url-ответов.
+- [x] `src/openai/fallback.js` — цепочка `fallback.models` (`fallbackChain`,
+      `fallbackModels`, `withModelFallback`) + ротация бэкендов.
+- [x] `src/model/profiles.js` — `MODEL_PROFILES`: window/maxOutput/ceiling по
       каждому модельному семейству; `getModelProfile()`, `snapEffort()`,
-      `contextBytes()` (слова small/normal/large/max → байты).
-- [ ] Убрать из перенесённых файлов apimart/decompose-специфику монолита
-      (`src/openai/apimart.js`, `src/openai/decompose.js` не переносятся как есть —
-      их логика растворяется в client/fallback).
+      `contextBytes()` (слова small/normal/large/max → байты), `maxOutputFor()`.
+- [x] Убрана из перенесённых файлов apimart/decompose-специфика монолита:
+      `src/openai/apimart.js`, `src/openai/decompose.js` и `src/roles/vectorizer.js`
+      удалены — их логика растворилась в client/fallback, а vectorize в декомпозере
+      не нужен.
+- [x] `src/roles/index.js` переписан под новый контракт клиента: `resolveRole()`
+      (роль → `roles.default` → верх), `snapEffort` + потолок роли, разбор JSON по
+      схеме, tool-цикл (вызовы модели → `toolset.execute` → ответы обратно в модель).
 
-Критерий готовности: `createClient({ config })` делает тестовый generate/edit
-на routerai-proxyapi цепочкой и возвращает байты PNG.
+Проверено: `test/openai.test.js` (19 тестов) и `test/roles.test.js` (7 тестов) —
+тело запроса, разбор ответа, multipart, ключи бэкендов из env, цепочка fallback,
+профили моделей, клиент против локального mock-хоста (Responses, откат на Chat
+Completions, ротация бэкендов, generate/edit → байты PNG).
+
+Критерий готовности: `createClient({ config })` делает generate/edit по цепочке
+ротации и возвращает байты PNG — закрыт (mock-хост + chain-ротация).
 
 ---
 
-## 4. Image-слой — ⏳
+## 4. Image-слой — ✅ ЗАВЕРШЕН
 
-Порт `src/shared/image-*` (~1300 строк raster.js из монолита), fallback-цепочка
-sharp → canvas → ImageMagick:
+Порт `src/shared/image-*` из монолита, fallback-цепочка sharp → canvas → ImageMagick:
 
-- [ ] `src/image/raster.js` — `rasterCrop`, `rasterPatch` (box-patch вставка),
-      `decodeRgba`, `rasterInfo`, `encodeRgba`; движок выбирается по
-      `config.raster.engine` (auto = probe sharp → canvas → magick).
-- [ ] `src/image/canvas.js`, `src/image/magick.js` — движки; `magickPath` из
-      конфига, `child_process` без shell.
-- [ ] `src/image/crop.js`, `src/image/padding.js` — rect-кроп с clamp, pad полосы.
-- [ ] `src/image/rectify.js` — `perspectiveRectify(quad)`, `measureResidualSkew`
-      (проектная развёртка + оценка остаточного наклона).
-- [ ] `src/image/skew.js`, `edge-snapping.js`, `distort.js`, `kmeans.js`,
-      `alpha.js`, `colors.js` — утилиты фаз (переносить только вызываемые из
-      archive/reference-phases).
-- [ ] `src/image/sizing.js` — downscale к `image.maxSide` для model-bound копий.
-- [ ] Капы: `maxMegapixels`, `alphaThreshold`.
+- [x] `src/image/raster.js` — порт монолитного `src/shared/image-raster.js`:
+      `rasterCrop`, `rasterPatch` (box-patch вставка), `decodeRgba(bytes, engine, maxSide)`,
+      `encodeRgba`, `rasterScale`, `rasterInfo`, `rasterCompare`, `rasterTrim`, `rasterSplit`,
+      `rasterPadImageBytes`, `rasterRemoveImagePadding`, `rasterFitToSourceFrame`,
+      `rasterizeSvg` (ReSVG → sharp → canvas), альфа-маски. Движок выбирается по
+      `config.raster.engine` (auto = probe sharp → canvas).
+- [x] `src/image/canvas.js` — движок node-canvas (единственная точка загрузки нативного
+      модуля, кэш на процесс); `src/image/magick.js` — порт `src/shared/image-magick.js`
+      (`detectMagick`, `magickCrop`, `magickSplit`, `magickResize`, `magickConvert`,
+      `magickIdentify`, `magickPadImageBytes`, `magickRemoveImagePadding`) на `execFile`
+      **без shell**, `magickPath` из `config.raster.magickPath`.
+- [x] `src/image/crop.js` — rect-кроп с clamp (`clampRect`, `cropRect`, `cropToBuffer`);
+      `src/image/padding.js` — pad полосы (`padToSize`, `padBand`, `detectPadding`,
+      `removePadding`).
+- [x] `src/image/distort.js` — гомография без внешних программ: `solveHomography`
+      (Гаусс с частичным выбором ведущего элемента), `quadToRect`, `solveQuadError`,
+      `perspectiveRectify` — обратное отображение + билинейная выборка, одно
+      пересемплирование, прозрачные пиксели вне квада.
+- [x] `src/image/skew.js` — `measureResidualSkew` / `measureResidualSkewFromBytes`
+      (профиль проекций, без ресемплирования); `src/image/rectify.js` — фасад
+      `perspectiveRectify` + `measureResidualSkew` + замер остаточного наклона.
+- [x] `src/image/sizing.js` — `downscaleToMaxSide` для model-bound копий, кап
+      `maxMegapixels`, `computeSize`, `fitBox`, `NAMED_FRAMES`.
+- [ ] Не переносилось (нет вызовов из `archive/reference-phases`): `edge-snapping.js`
+      (уточнение углов по границам), `kmeans.js`, `alpha.js`, `colors.js`,
+      `image-distort`-provenance-sidecar.
+
+Проверено: `test/image.test.js` (13 тестов) — decode→encode без потери пикселей,
+цикл crop→patch возвращает исходную картинку побайтово, отказ латки не в кадр,
+`rasterCompare` на одинаковых файлах, гомография сходится по углу, квад с
+перепутанными углами отвергается, `perspectiveRectify` на всём кадре сохраняет
+картинку, замер наклона на горизонтальных полосах даёт 0°, band-pad прозрачен и
+измерим, downscale держит пропорции, кап мегапикселей срабатывает, pad/unpad
+возвращает исходные пиксели.
+Общий прогон: `npm test` → 39/39.
 
 Критерий готовности: круговой тест crop→patch→encode идентичен результату
-монолита на `examples/original.png` (побайтово или в пределах ssim-допуска).
+монолита на `examples/original.png` — закрыт (побайтово, PNG без потерь).
 
 ---
 

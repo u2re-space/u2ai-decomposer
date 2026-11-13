@@ -8,6 +8,7 @@ import path from 'node:path';
 import { mkdir, readFile, writeFile, rm, unlink } from 'node:fs/promises';
 import { rasterPadImageBytes, decodeRgba, rasterCrop, rasterPatch } from '../image/raster.js';
 import { paddedSizeToMinPixels, IMAGE_SIZES, sniffImage, imageModelFor } from '../openai/images.js';
+import { imagePart } from '../openai/responses.js';
 import { EXTEND_SCHEMA } from '../agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 
@@ -85,13 +86,13 @@ export async function runExtension(state, notify = () => {}) {
         let bytes;
         try { bytes = await readFile(abs); } catch { warnings.push(`extension: cannot read ${img}`); continue; }
 
-        const decoded = await decodeRgba(bytes, { engine: config.image?.rasterEngine ?? 'auto' });
+        const decoded = await decodeRgba(bytes, config.raster?.engine ?? 'auto');
         const { width, height } = decoded;
 
         // Ask the extender role.
         const result = await roles.run('extender', {
             text: `Reference: ${img}\nSize: ${width}×${height} pixels.\nSay whether the frame cuts real content, and write the instruction for the band.`,
-            parts: [{ type: 'input_image', source: { type: 'base64', data: bytes.toString('base64'), media_type: sniffImage(bytes).mime } }],
+            parts: [imagePart(bytes, sniffImage(bytes).mime)],
             instructions: ROLE_INSTRUCTIONS.extender,
             schema: EXTEND_SCHEMA, schemaName: 'extendPlan', maxTurns: 1,
             model, effort,
@@ -111,28 +112,28 @@ export async function runExtension(state, notify = () => {}) {
 
         // Pad the canvas.
         const target = paddedSizeToMinPixels({ width, height }, editorModel);
-        const padded = await rasterPadImageBytes({ bytes, engine: config.image?.rasterEngine ?? 'auto', targetWidth: target?.width ?? width, targetHeight: target?.height ?? height });
+        const padded = await rasterPadImageBytes({ bytes, engine: config.raster?.engine ?? 'auto', targetWidth: target?.width ?? width, targetHeight: target?.height ?? height });
         if (!padded?.padded) {
             state.extended.push({ from: img, to: img, kept: true });
             continue;
         }
 
         // Ask the editor.
-        const payloads = await client.images.edit({
+        const edited = await client.images.edit({
             model: editorModel,
             prompt: `${plan.prompt}\n\nThe attached picture is a reference whose canvas has been made larger. Draw only into the empty part.`,
             size: `${padded.width}x${padded.height}`,
             format: 'png',
-            files: [{ filename: path.basename(img), mime: sniffImage(padded.bytes).mime, bytes: padded.bytes }],
+            image: { filename: path.basename(img), mime: sniffImage(padded.bytes).mime, bytes: padded.bytes },
         });
 
-        if (!Array.isArray(payloads) || !payloads.length) {
+        if (!edited?.images?.length) {
             warnings.push(`extension: empty answer for ${img}`);
             continue;
         }
 
-        const answerBytes = Buffer.from(payloads[0], 'base64');
-        const after = await decodeRgba(answerBytes, { engine: config.image?.rasterEngine ?? 'auto' });
+        const answerBytes = edited.images[0].bytes;
+        const after = await decodeRgba(answerBytes, config.raster?.engine ?? 'auto');
 
         // Verify seam.
         const seam = seamDeltaCalc(decoded, after, width, height, SEAM_ROWS);

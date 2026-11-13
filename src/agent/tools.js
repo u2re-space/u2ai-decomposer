@@ -6,8 +6,8 @@
  */
 import path from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { rasterCrop, rasterPatch, rasterInfo, decodeRgba } from '../image/raster.js';
-import { createClient } from '../openai/client.js';
+import { rasterCrop, rasterInfo, rasterCompare } from '../image/raster.js';
+import { sniffImage } from '../openai/images.js';
 
 /**
  * Available tools for the decomposer domain.
@@ -23,6 +23,31 @@ const TOOL_DEFS = {
     write_file: { description: 'Write content to a file', params: { path: { type: 'string' }, content: { type: 'string' } } },
     read_file: { description: 'Read a file', params: { path: { type: 'string' } } },
 };
+
+/**
+ * The tool definitions in the Responses API shape.
+ * @param {object} [tools] the `tools` section of the config; a false value disables a tool
+ * @returns {object[]}
+ */
+export function toolSpecs(tools = {}) {
+    const out = [];
+    for (const [name, def] of Object.entries(TOOL_DEFS)) {
+        if (tools?.[name] === false) continue;
+        out.push({
+            type: 'function',
+            name,
+            description: def.description,
+            parameters: {
+                type: 'object',
+                properties: def.params,
+                required: Object.keys(def.params).filter((key) => !['output', 'outputDir', 'size'].includes(key)),
+                additionalProperties: false,
+            },
+        });
+    }
+    return out;
+}
+
 
 /**
  * Get enabled tool names for a role.
@@ -43,10 +68,11 @@ export function enabledToolNames(tools, opts = {}) {
 /**
  * Create a toolset executor bound to a working directory.
  * @param {{ root: string, config: object, client?: object }} opts
- * @returns {{ execute: (name: string, args: object) => Promise<string> }}
+ * @returns {{ execute: (name: string, args: object) => Promise<string>, specs: object[] }}
  */
 export function createToolset({ root, config, client }) {
-    const engine = config.image?.rasterEngine ?? 'auto';
+    const engine = config.raster?.engine ?? 'auto';
+    const specs = toolSpecs(config?.tools);
 
     async function execute(name, args) {
         switch (name) {
@@ -76,20 +102,34 @@ export function createToolset({ root, config, client }) {
                 }
                 return `Split into ${(args.rows||1)*(args.cols||1)} tiles in ${outDir}`;
             }
+            case 'compare_images': {
+                const before = await readFile(path.resolve(root, args.before));
+                const after = await readFile(path.resolve(root, args.after));
+                const delta = await rasterCompare({ before, after, engine });
+                return `Difference: mean ${delta.meanDelta.toFixed(2)}/255, changed ${(delta.changedShare * 100).toFixed(1)}% of ${delta.width}×${delta.height}`;
+            }
             case 'correct_perspective': {
                 const { perspectiveRectify } = await import('../image/rectify.js');
                 const abs = path.resolve(root, args.path);
                 const corners = JSON.parse(args.corners_json);
                 const outAbs = path.resolve(root, args.output ?? abs.replace('.', '-rectified.'));
-                await perspectiveRectify(abs, corners, outAbs, { cwd: root, engine });
-                return `Perspective corrected → ${outAbs}`;
+                const result = await perspectiveRectify({
+                    input: abs,
+                    output: outAbs,
+                    quad: corners,
+                    cwd: root,
+                    engine,
+                });
+                return `Perspective corrected → ${result.rel} (${result.width}×${result.height}, residual tilt ${result.residual?.angleDeg ?? 0}°)`;
             }
             case 'generate_image': {
                 if (!client?.images) return 'Images API unavailable';
-                const payloads = await client.images.generate({ model: config.imageModel, prompt: args.prompt, size: args.size ?? '1024x1024', format: 'png' });
-                if (payloads?.length) {
+                const { images } = await client.images.generate({
+                    model: config.imageModel, prompt: args.prompt, size: args.size ?? '1024x1024', format: 'png',
+                });
+                if (images?.length) {
                     const outAbs = path.resolve(root, args.output ?? 'generated.png');
-                    await writeFile(outAbs, Buffer.from(payloads[0], 'base64'));
+                    await writeFile(outAbs, images[0].bytes);
                     return `Generated → ${outAbs}`;
                 }
                 return 'Generation returned empty';
@@ -98,10 +138,15 @@ export function createToolset({ root, config, client }) {
                 if (!client?.images) return 'Images API unavailable';
                 const abs = path.resolve(root, args.image);
                 const bytes = await readFile(abs);
-                const payloads = await client.images.edit({ model: config.imageModel, prompt: args.prompt, format: 'png', files: [{ filename: path.basename(abs), mime: 'image/png', bytes }] });
-                if (payloads?.length) {
+                const { images } = await client.images.edit({
+                    model: config.imageModel,
+                    prompt: args.prompt,
+                    format: 'png',
+                    image: { filename: path.basename(abs), mime: sniffImage(bytes).mime, bytes },
+                });
+                if (images?.length) {
                     const outAbs = path.resolve(root, args.output ?? abs.replace('.', '-edited.'));
-                    await writeFile(outAbs, Buffer.from(payloads[0], 'base64'));
+                    await writeFile(outAbs, images[0].bytes);
                     return `Edited → ${outAbs}`;
                 }
                 return 'Edit returned empty';
@@ -121,5 +166,5 @@ export function createToolset({ root, config, client }) {
         }
     }
 
-    return { execute };
+    return { execute, specs };
 }
