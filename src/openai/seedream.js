@@ -12,6 +12,11 @@
  *   decomposeLayers, generateImage
  * @ai.tags images, seedream, decomposition, layers
  * @ai.hint io
+ * @ai.hint legacy-0.2
+ *
+ * Ported from the monolith (`src/openai/seedream-5-5.js`): the route, the task runner and the box
+ * geometry came from there. The channel model is the one of this package — a task is polled on the
+ * host that created it — and the messages are English.
  *
  * Documented API: https://docs.apimart.ai/ru/api-reference/images/seedream-5-5/generation
  *
@@ -32,6 +37,7 @@
 
 import { setTimeout as sleep } from 'node:timers/promises';
 import { ApiError } from './errors.js';
+import { sniffImage } from './images.js';
 
 /** Default model id of the seedream-5.5 route. */
 export const SEEDREAM_MODEL = 'seedream-5-5';
@@ -593,11 +599,11 @@ export async function generateImage({ channels, model = SEEDREAM_MODEL, prompt, 
     const images = [];
     for (const picture of taskImageSources(raw)) {
         if (picture.kind === 'b64') {
-            images.push({ bytes: Buffer.from(picture.value, 'base64'), mime: 'image/png' });
+            images.push({ bytes: Buffer.from(picture.value, 'base64'), mime: sniffImage(Buffer.from(picture.value, 'base64')).mime });
             continue;
         }
         const bytes = await downloadImageBytes(picture.value, signal);
-        if (bytes) images.push({ bytes, mime: 'image/png' });
+        if (bytes) images.push({ bytes, mime: sniffImage(bytes).mime });
     }
     if (!images.length) {
         throw new ApiError('The seedream-5.5 task finished without a picture.', { code: 'INVALID_RESPONSE' });
