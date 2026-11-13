@@ -18,7 +18,7 @@
  * @depends node:path, node:fs/promises, agent/schemas, agent/paths, agent/tool-specs,
  *   image/raster, image/sizing, openai/images, openai/responses, roles/index
  * @usedBy shared/pipeline
- * @exports runResolve, LAYERS_DIR, DECOMPOSITION_FILE
+ * @exports runResolve, LAYERS_DIR, DECOMPOSITION_FILE, DIRECTOR_TOOLS
  * @ai.tags decomposition, output, layers
  * @ai.hint keep
  */
@@ -41,7 +41,7 @@ export const LAYERS_DIR = 'layers';
 export const DECOMPOSITION_FILE = 'decomposition.json';
 
 /** The tools the director may call while it splits a screen into layers. */
-const DIRECTOR_TOOLS = ['view_image'];
+export const DIRECTOR_TOOLS = ['view_image'];
 
 /**
  * The chain of the files: what replaced what.

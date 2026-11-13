@@ -16,7 +16,7 @@
  * @depends node:path, node:fs/promises, agent/schemas, agent/tool-specs, image/raster,
  *   openai/images, openai/responses, roles/index, stages/restore-plan
  * @usedBy shared/pipeline
- * @exports runOverlap, OVERLAP_DIR
+ * @exports runOverlap, OVERLAP_DIR, OVERLAP_TOOLS
  * @ai.tags overlap, screens, fragments
  * @ai.hint keep
  */
@@ -36,7 +36,7 @@ import { editorPrompt, pickPatches, planFragment } from './restore-plan.js';
 export const OVERLAP_DIR = 'overlap';
 
 /** The tools the overlap role may call: it looks, it compares, it names. */
-const OVERLAP_TOOLS = ['view_image', 'compare_images'];
+export const OVERLAP_TOOLS = ['view_image', 'compare_images'];
 
 /**
  * The screens the stage works on: the files the reconstruct stage produced, or the images of the

@@ -11,7 +11,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { loadConfig } from './config.js';
-import { createClient } from './openai/client.js';
+import { createClient, resolveBackends } from './openai/client.js';
 import { createRenderer, createPlainRenderer, detectMode } from './cli/renderer.js';
 import { checkNodeVersion } from './cli/compatibility.js';
 import { HELP } from './help.js';
@@ -90,6 +90,23 @@ export function parseArgv(argv) {
 }
 
 /**
+ * Is there a key to call the API with?
+ *
+ * A local server may work without one; a remote host may not, and the difference is worth a
+ * sentence before the run starts rather than a 401 in the middle of it.
+ * @param {object} config the loaded configuration
+ * @param {object} [env] the environment the keys are read from
+ * @returns {boolean}
+ * @ai.hint pure
+ */
+export function apiKeyAvailable(config, env = process.env) {
+    const chain = resolveBackends(config, { kind: 'text', env });
+    if (chain.some((item) => item.apiKey)) return true;
+    // A server on this machine is often open.
+    return chain.length > 0 && chain.every((item) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(item.baseURL));
+}
+
+/**
  * Main entry point: load config, create client, run the pipeline.
  * @param {string[]} argv
  * @returns {Promise<number>} exit code
@@ -112,7 +129,18 @@ export async function main(argv = process.argv.slice(2)) {
     }
 
     const opts = parseArgv(argv);
-    const config = await loadConfig({ configPath: opts.configPath, cwd: process.cwd() });
+    let config;
+    try {
+        config = await loadConfig({ configPath: opts.configPath, cwd: process.cwd() });
+    } catch (error) {
+        console.error(error?.message ?? String(error));
+        return 1;
+    }
+    if (!opts.dryRun && !apiKeyAvailable(config)) {
+        console.error('No API key: set AI_DECOMPOSE_API_KEY, put "apiKey" into ~/.ai-decompose/config.json, '
+            + 'or give a backend the name of an environment variable that holds the key.');
+        return 1;
+    }
     const isTTY = detectMode() === 'tty';
     const renderer = isTTY
         ? createRenderer({ verbose: opts.verbose })

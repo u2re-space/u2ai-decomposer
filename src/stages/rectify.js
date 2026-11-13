@@ -17,7 +17,7 @@
  *   image/raster, image/skew, openai/responses, openai/images, roles/index
  * @usedBy shared/pipeline
  * @exports runRectify, acceptsRectification, producedScreens, validateRectifiedFile,
- *   swapReferencePaths, RECTIFIED_DIR, MAX_RESIDUAL_DEG, MIN_IMPROVEMENT_DEG
+ *   swapReferencePaths, RECTIFIED_DIR, MAX_RESIDUAL_DEG, MIN_IMPROVEMENT_DEG, RECTIFIER_TOOLS
  * @ai.tags rectification, perspective, screens
  * @ai.hint keep
  */
@@ -43,7 +43,7 @@ export const MAX_RESIDUAL_DEG = 0.8;
 export const MIN_IMPROVEMENT_DEG = 0.4;
 
 /** The tools the rectifier may call: geometry and verification, nothing else. */
-const RECTIFIER_TOOLS = ['view_image', 'correct_perspective', 'compare_images'];
+export const RECTIFIER_TOOLS = ['view_image', 'correct_perspective', 'compare_images'];
 
 /** What the role is told when the picture has to be cut screen by screen. */
 const SPLIT_NOTE = [

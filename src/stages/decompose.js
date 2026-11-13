@@ -4,7 +4,7 @@
  * @purpose Stage 1: split the reference into screens, one clean sub-reference per screen.
  * @depends node:path, node:fs/promises, image/sizing, agent/decomposition, agent/schemas,
  *   stages/decompose-screens
- * @exports runDecompose
+ * @exports runDecompose, AGENT_TOOLS, INLINE_TOOLS
  * @ai.tags decomposition, screens
  * @ai.hint keep
  */
@@ -21,10 +21,10 @@ import { toPosix } from '../agent/paths.js';
 import { cropScreens, planScreens } from './decompose-screens.js';
 
 /** The tools the decomposer may call when it writes the screens itself. */
-const AGENT_TOOLS = ['view_image', 'crop_image', 'split_image', 'compare_images', 'correct_perspective'];
+export const AGENT_TOOLS = ['view_image', 'crop_image', 'split_image', 'compare_images', 'correct_perspective'];
 
 /** The tools the decomposer may call when the harness cuts the screens. */
-const INLINE_TOOLS = ['view_image'];
+export const INLINE_TOOLS = ['view_image'];
 
 /**
  * Run the decompose stage.
