@@ -24,14 +24,16 @@ For each screen, determine:
 3. Any notes about transformations applied.
 4. Links to related screens and sources.
 
-If advanced mode is enabled and a seedream-5.5 model is available, run layer split on the
-first flat screen: the picture is decomposed into PNG layers with bounding boxes, written under
-layers/, and listed in the decomposition JSON as layers.
+If advanced mode is enabled, split the first flat screen into layers: look at the picture and
+name every layer of it — the background, the panels, the cards, the images, the icons, every
+block of text — and give the box of each layer in the pixels of the picture you saw. The harness
+cuts the layers out of the original pixels and writes them under layers/; you do not draw a
+layer and you do not write a file. Name the layers in English with Latin letters and digits only.
 
 Return the required JSON:
 - summary: overall decomposition summary
 - screens: ordered list with name, source, final subReference path, subReferenceKind, purpose
 - subReferences: every image file with path, screen, kind, source, notes
-- layers: (advanced only) layer objects with path, box, screen
+- layers: (advanced only) layer objects with name, description and box
 - notes: any ambiguities or issues
 ${UNTRUSTED}`;

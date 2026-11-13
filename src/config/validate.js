@@ -108,7 +108,12 @@ function validateStage(id, section, fail) {
       if (!(Number.isFinite(section[key]) && section[key] >= 0)) fail(`${where}.${key}: число ≥ 0`);
     }
   }
-  if (id === 'resolve' && typeof section.layers !== 'boolean') fail(`${where}.layers: true | false`);
+  if (id === 'resolve') {
+    if (typeof section.layers !== 'boolean') fail(`${where}.layers: true | false`);
+    if ('maxLayers' in section && !(Number.isSafeInteger(section.maxLayers) && section.maxLayers >= 0)) {
+      fail(`${where}.maxLayers: целое ≥ 0`);
+    }
+  }
 }
 
 /**

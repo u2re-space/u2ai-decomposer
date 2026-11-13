@@ -132,6 +132,7 @@ export async function runPipeline({
         root,
         images,
         workDir,
+        outDir,
         config,
         client,
         roles,

@@ -172,3 +172,23 @@ export const RESTORE_VERIFY_SCHEMA = object({
     verdict: { type: 'string', enum: ['better', 'same', 'worse'], description: 'better=defect gone, worse=anything else changed.' },
     reason: { ...string, description: 'One sentence naming what changed.' },
 });
+
+/**
+ * The answer of the director when a screen is split into layers: the box of every layer in the
+ * pixels of the picture the model saw. The harness cuts the pixels itself.
+ */
+export const LAYERS_SCHEMA = object({
+    assessment: { ...string, description: 'What the screen is made of.' },
+    layers: {
+        type: 'array',
+        description: 'One entry per visual layer of the screen.',
+        items: object({
+            name: { ...string, description: 'Short name of the layer, Latin letters and digits only.' },
+            description: { ...string, description: 'What the layer shows.' },
+            x: { type: 'integer', description: 'Left edge in the pixels of the picture you saw.' },
+            y: { type: 'integer', description: 'Top edge in the pixels of the picture you saw.' },
+            width: { type: 'integer', description: 'Width of the layer in pixels.' },
+            height: { type: 'integer', description: 'Height of the layer in pixels.' },
+        }),
+    },
+});

@@ -171,6 +171,8 @@ export const defaults = {
       enabled: true,
       /** Emit layers/ next to decomposition.json (advanced decomposition). */
       layers: false,
+      /** Max layers of one screen kept from the split. */
+      maxLayers: 32,
     },
   },
 

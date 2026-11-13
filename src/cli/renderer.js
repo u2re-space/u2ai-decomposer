@@ -83,6 +83,9 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'overlap.done':
                 console.log(`  overlap resolved: ${e.count}`);
                 break;
+            case 'resolve.layers':
+                if (verbose) console.log(`  layers: ${e.count}`);
+                break;
             case 'resolve.done':
                 console.log(`  output: ${e.path}`);
                 break;
@@ -147,6 +150,9 @@ export function createRenderer({ verbose = false } = {}) {
                 break;
             case 'overlap.done':
                 console.log(paint(`  overlap resolved: ${e.count}`, COLORS.dim));
+                break;
+            case 'resolve.layers':
+                if (verbose) console.log(paint(`  layers: ${e.count}`, COLORS.dim));
                 break;
             case 'resolve.done':
                 console.log(paint(`  output: ${e.path}`, COLORS.bold));
