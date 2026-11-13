@@ -20,7 +20,9 @@ import { imageModelFor, sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
 import { EXTEND_SCHEMA } from '../agent/schemas.js';
 
-const EXTENDED_DIR = 'extended';
+/** The directory under the work directory where the extended canvas is written. */
+export const EXTENDED_DIR = 'extended';
+
 const GROWABLE_EDGES = new Set(['bottom', 'right', '']);
 const MIN_PROMPT_LENGTH = 24;
 const MIN_BAND_FILL = 0.5;

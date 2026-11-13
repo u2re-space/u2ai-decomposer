@@ -29,6 +29,7 @@ export * from './agent/schemas.js';
 export * from './agent/decomposition.js';
 export * from './agent/paths.js';
 export * from './shared/pipeline.js';
+export * from './stages/index.js';
 export * from './stages/extension.js';
 export * from './stages/decompose.js';
 export * from './stages/decompose-screens.js';

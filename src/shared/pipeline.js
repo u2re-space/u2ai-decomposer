@@ -13,35 +13,18 @@ import { createRoleRunner } from '../roles/index.js';
 import { createToolset } from '../agent/tools.js';
 import { loadSkills } from '../agent/skills.js';
 import { connectMcpServers } from '../agent/mcp.js';
-import { runExtension } from '../stages/extension.js';
-import { runDecompose } from '../stages/decompose.js';
-import { runRectify } from '../stages/rectify.js';
-import { runReconstruct } from '../stages/reconstruct.js';
-import { runOverlap } from '../stages/overlap.js';
-import { runResolve } from '../stages/resolve.js';
+import { STAGE_DEFS, STAGE_DIRS, STAGE_ROLES } from '../stages/index.js';
+import { DECOMPOSITION_FILE } from '../stages/resolve.js';
 
 /**
  * Ordered stage definitions.
  * @type {Array<{ id: string, label: string, run: Function }>}
  */
-export const STAGES = [
-    { id: 'extend',      label: 'Extend reference',      run: runExtension },
-    { id: 'decompose',   label: 'Crop to screens',       run: runDecompose },
-    { id: 'rectify',     label: 'Rectify screens',       run: runRectify },
-    { id: 'reconstruct', label: 'Restore lost details',  run: runReconstruct },
-    { id: 'overlap',     label: 'Remove overlaps',       run: runOverlap },
-    { id: 'resolve',     label: 'Resolve final output',  run: runResolve },
-];
-
-/** The role each stage asks for its plan or its verdict. */
-const STAGE_ROLES = Object.freeze({
-    extend: 'extender',
-    decompose: 'decomposer',
-    rectify: 'rectifier',
-    reconstruct: 'restorer',
-    overlap: 'overlap',
-    resolve: 'director',
-});
+export const STAGES = STAGE_DEFS.map((stage) => ({
+    id: stage.id,
+    label: stage.label,
+    run: stage.run,
+}));
 
 /**
  * Execute the pipeline stages in order.
@@ -98,17 +81,10 @@ export async function runPipeline({
     }
 
     if (dryRun) {
-        const outputDirs = {
-            extend: 'extended',
-            decompose: 'screens',
-            rectify: 'rectified',
-            reconstruct: 'restored',
-            overlap: 'overlap',
-        };
         const outputs = toRun.map((stage) => (
             stage.id === 'resolve'
-                ? path.join(outDir, 'decomposition.json')
-                : path.join(workDir, outputDirs[stage.id] ?? stage.id)
+                ? path.join(outDir, DECOMPOSITION_FILE)
+                : path.join(workDir, STAGE_DIRS[stage.id] ?? stage.id)
         ));
         notify({
             type: 'plan',
@@ -124,7 +100,7 @@ export async function runPipeline({
             }),
             outputs,
         });
-        return { output: null, warnings: [] };
+        return { output: null, warnings: [], failed: false };
     }
 
     // Shared state passed between stages.
@@ -153,21 +129,42 @@ export async function runPipeline({
         warnings: [],
     };
 
-    for (const stage of toRun) {
-        notify({ type: 'stage.start', stage: stage.id, label: stage.label });
-        if (!dryRun) {
-            try {
-                await stage.run(state, notify);
-            } catch (error) {
-                if (error?.name === 'AbortError') throw error;
-                state.warnings.push(`${stage.id}: ${error.message}`);
-                notify({ type: 'stage.error', stage: stage.id, error: error.message });
-            }
-        }
-        notify({ type: 'stage.done', stage: stage.id });
-    }
+    const failed = await runStages(toRun, state, notify);
 
     for (const connection of mcp) await connection.close().catch(() => {});
 
-    return { output: state.decomposition, warnings: state.warnings };
+    return { output: state.decomposition, warnings: state.warnings, failed };
+}
+
+/**
+ * Run the stages one after another.
+ *
+ * A stage that throws does not stop the pipeline: the run goes on, the failure is remembered as a
+ * warning, and the caller is told that something did not work. Only an abort leaves the run.
+ * @param {Array<{ id: string, label: string, run: Function }>} stages the stages to run, in order
+ * @param {object} state pipeline state
+ * @param {Function} notify event callback
+ * @returns {Promise<boolean>} true when a stage failed
+ * @ai.hint io
+ */
+export async function runStages(stages, state, notify = () => {}) {
+    let failed = false;
+    for (const stage of stages) {
+        notify({ type: 'stage.start', stage: stage.id, label: stage.label });
+        const before = state.warnings.length;
+        try {
+            await stage.run(state, notify);
+        } catch (error) {
+            if (error?.name === 'AbortError') throw error;
+            state.warnings.push(`${stage.id}: ${error.message}`);
+            failed = true;
+            notify({ type: 'stage.error', stage: stage.id, error: error.message });
+        }
+        // Every warning a stage collected is shown to the reader, not only kept in the state.
+        for (const message of state.warnings.slice(before)) {
+            notify({ type: 'warning', message });
+        }
+        notify({ type: 'stage.done', stage: stage.id });
+    }
+    return failed;
 }

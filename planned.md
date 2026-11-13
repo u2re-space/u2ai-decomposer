@@ -1,6 +1,6 @@
 # План перехода: Universal-AI (монолит 0.2.xx) → @u2ai/decomposer (0.3.xx)
 
-> Актуальный статус: **шаги 1–11 завершены**, следующий — шаг 12 (pipeline-обвязка).
+> Актуальный статус: **шаги 1–12 завершены**, следующий — шаг 13 (тесты и проверка).
 > Рабочий дом переносимого кода: `submodules/u2ai-decomposer/`.
 
 ---
@@ -446,17 +446,35 @@ clamp рамки кропа, соответствие `minScreenSide`/`maxRects`
 
 ---
 
-## 12. Pipeline-оркестрация + CLI-обвязка — ⏳
+## 12. Pipeline-оркестрация + CLI-обвязка — ✅ ЗАВЕРШЁН
 
-- [ ] `src/shared/pipeline.js` — `runPipeline`: порядок 6 стадий, пропуск по
+- [x] `src/stages/index.js` — реестр стадий: порядок, заголовок, роль, каталог
+      артефактов; `src/shared/pipeline.js` берёт стадии из реестра, а не из
+      собственного списка.
+- [x] `src/shared/pipeline.js` — `runPipeline`: порядок 6 стадий, пропуск по
       `stages.<id>.enabled` и `--stages`, `--stop-after <stage>`, передача state,
-      dry-run (план без вызовов API).
-- [ ] `src/stages/index.js` — реестр стадий { id → module }.
-- [ ] `src/cli/renderer.js` + `colors.js` — TTY-рендер событий стадий
-      (start/attempt/artifact/warn/fail), exit-коды; `compatibility.js`.
-- [ ] Артефакты строго в `./decomposition/{extended,screens,rectified,restored,overlap}/`
-      + `decomposition.json`.
-- [ ] `--dry-run` печатает план: стадии, модели, пути выхода.
+      dry-run (план без вызовов API); `runStages` вынесен отдельно и тестируется
+      на своих стадиях.
+- [x] Падение стадии не роняет прогон: ошибка попадает в `state.warnings`, в
+      событие `stage.error` и в exit-код; прерывание (`AbortError`) останавливает
+      прогон сразу.
+- [x] `src/cli/renderer.js` + `colors.js` — TTY-рендер событий стадий
+      (start/done/error/артефакт/warning), плоский рендер для pipe; `compatibility.js`
+      (проверка версии Node) подключён к `main()`.
+- [x] Exit-коды: 0 — успех, 1 — упавшая стадия или ошибка, 130 — прерывание.
+- [x] Артефакты строго в `./decomposition/{extended,screens,rectified,restored,overlap}/`
+      + `decomposition.json` (+ `layers/` в advanced-режиме).
+- [x] `--dry-run` печатает план: стадии, модели, пути выхода.
+
+Проверено: `test/pipeline.test.js` (8 тестов) — фиксированный порядок стадий и
+каталоги артефактов, план из шести стадий, `--stages` выбирает стадии, но не их
+порядок, выключенная стадия не идёт, `--stop-after` обрывает прогон, упавшая
+стадия не мешает остальным (и её предупреждение доходит до читателя), прерывание
+останавливает прогон.
+Общий прогон: `npm test` → 126/126.
+
+Критерий готовности: порядок стадий зафиксирован реестром, упавшая стадия
+видна и не скрывает результат остальных — закрыт.
 
 ---
 

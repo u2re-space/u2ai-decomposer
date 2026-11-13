@@ -13,6 +13,7 @@ import { createRequire } from 'node:module';
 import { loadConfig } from './config.js';
 import { createClient } from './openai/client.js';
 import { createRenderer, createPlainRenderer, detectMode } from './cli/renderer.js';
+import { checkNodeVersion } from './cli/compatibility.js';
 import { HELP } from './help.js';
 import { runPipeline } from './shared/pipeline.js';
 
@@ -104,6 +105,12 @@ export async function main(argv = process.argv.slice(2)) {
         return 0;
     }
 
+    const runtime = checkNodeVersion();
+    if (!runtime.ok) {
+        console.error(`Node.js ${runtime.required} is required, this is ${runtime.version}.`);
+        return 1;
+    }
+
     const opts = parseArgv(argv);
     const config = await loadConfig({ configPath: opts.configPath, cwd: process.cwd() });
     const isTTY = detectMode() === 'tty';
@@ -113,7 +120,7 @@ export async function main(argv = process.argv.slice(2)) {
     const client = await createClient({ config, signal: null });
 
     try {
-        await runPipeline({
+        const result = await runPipeline({
             root: process.cwd(),
             images: opts.image,
             outDir: opts.out,
@@ -128,7 +135,9 @@ export async function main(argv = process.argv.slice(2)) {
             dryRun: opts.dryRun,
             notify: (event) => renderer.event(event),
         });
-        return 0;
+        // A stage that threw leaves the run unfinished: the exit code says so, and the pipeline
+        // still leaves behind everything that did work.
+        return result?.failed ? 1 : 0;
     } catch (error) {
         if (error?.name === 'AbortError') {
             console.error('Aborted.');
