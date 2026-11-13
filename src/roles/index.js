@@ -12,7 +12,7 @@
 import { extenderInstructions } from './extender.js';
 import { decomposerInstructions } from './decomposer.js';
 import { rectifierInstructions } from './rectifier.js';
-import { restorerInstructions } from './restorer.js';
+import { restorerInstructions, restorerVerifyInstructions } from './restorer.js';
 import { overlapInstructions } from './overlap.js';
 import { directorInstructions } from './director.js';
 import { parseResponse } from '../openai/responses.js';
@@ -27,6 +27,7 @@ export const ROLE_INSTRUCTIONS = Object.freeze({
     decomposer: decomposerInstructions,
     rectifier: rectifierInstructions,
     restorer: restorerInstructions,
+    restorerVerify: restorerVerifyInstructions,
     overlap: overlapInstructions,
     director: directorInstructions,
 });

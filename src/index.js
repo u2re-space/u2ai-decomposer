@@ -33,6 +33,7 @@ export * from './stages/extension.js';
 export * from './stages/decompose.js';
 export * from './stages/decompose-screens.js';
 export * from './stages/rectify.js';
+export * from './stages/restore-plan.js';
 export * from './stages/reconstruct.js';
 export * from './stages/overlap.js';
 export * from './stages/resolve.js';

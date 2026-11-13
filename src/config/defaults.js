@@ -155,6 +155,8 @@ export const defaults = {
       maxAttempts: 2,
       /** Padding (px) around a lost-detail box before patching. */
       boxPadding: 16,
+      /** Max regions of one screen that may be repaired in one pass. */
+      maxPatches: 3,
     },
     overlap: {
       enabled: true,

@@ -74,6 +74,9 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'reconstruct.file':
                 if (verbose) console.log(`  restored: ${e.file}`);
                 break;
+            case 'reconstruct.done':
+                console.log(`  restored: ${e.file} (${e.status})`);
+                break;
             case 'overlap.done':
                 console.log(`  overlap resolved: ${e.count}`);
                 break;
@@ -132,6 +135,9 @@ export function createRenderer({ verbose = false } = {}) {
                 break;
             case 'reconstruct.file':
                 if (verbose) console.log(`  restored: ${e.file}`);
+                break;
+            case 'reconstruct.done':
+                console.log(paint(`  restored: ${e.file} (${e.status})`, COLORS.dim));
                 break;
             case 'overlap.done':
                 console.log(paint(`  overlap resolved: ${e.count}`, COLORS.dim));
