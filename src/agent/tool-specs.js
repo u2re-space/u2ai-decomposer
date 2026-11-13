@@ -93,7 +93,7 @@ export const TOOL_SPECS = Object.freeze({
             additionalProperties: false,
         },
         required: ['before', 'after'],
-        roles: ['extender', 'decomposer', 'restorer', 'overlap'],
+        roles: ['extender', 'decomposer', 'rectifier', 'restorer', 'overlap'],
     },
     correct_perspective: {
         configKey: 'image_correct_perspective',

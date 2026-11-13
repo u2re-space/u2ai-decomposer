@@ -68,6 +68,9 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'rectify.done':
                 console.log(`  rectified: ${e.count}`);
                 break;
+            case 'rectify.file':
+                if (verbose) console.log(`  rectified: ${e.file}`);
+                break;
             case 'reconstruct.file':
                 if (verbose) console.log(`  restored: ${e.file}`);
                 break;
@@ -123,6 +126,9 @@ export function createRenderer({ verbose = false } = {}) {
                 break;
             case 'rectify.done':
                 console.log(paint(`  rectified: ${e.count}`, COLORS.dim));
+                break;
+            case 'rectify.file':
+                if (verbose) console.log(paint(`  rectified: ${e.file}`, COLORS.dim));
                 break;
             case 'reconstruct.file':
                 if (verbose) console.log(`  restored: ${e.file}`);

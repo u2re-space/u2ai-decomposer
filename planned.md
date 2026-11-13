@@ -1,6 +1,6 @@
 # План перехода: Universal-AI (монолит 0.2.xx) → @u2ai/decomposer (0.3.xx)
 
-> Актуальный статус: **шаги 1–7 завершены**, следующий — шаг 8 (стадия rectify).
+> Актуальный статус: **шаги 1–8 завершены**, следующий — шаг 9 (стадия reconstruct).
 > Рабочий дом переносимого кода: `submodules/u2ai-decomposer/`.
 
 ---
@@ -301,14 +301,38 @@ clamp рамки кропа, соответствие `minScreenSide`/`maxRects`
 
 ---
 
-## 8. Стадия rectify (port `archive/reference-phases/rectify.js`) — ⏳
+## 8. Стадия rectify (port `archive/reference-phases/rectify.js`) — ✅ ЗАВЕРШЕН
 
-- [ ] Un-rotate / recover projection: quad от роли → `perspectiveRectify`
-      (magick и/или AI-редактор).
-- [ ] Верификация `measureResidualSkew` ≤ `residualSkewLimitDeg`, цикл
-      re-correct при превышении.
-- [ ] Резка коллажа на экраны (split pass, `maxSplitTurns`).
-- [ ] Артефакты → `./decomposition/rectified/`.
+Роль не отвечает на вопрос «ровная ли картинка»: она ставит углы, детерминированная
+проекция работает по ним, а результат судит измеримый остаточный наклон.
+
+- [x] Un-rotate / recover projection: роль `rectifier` получает инструменты
+      `view_image`, `correct_perspective`, `compare_images` (только геометрия — ни
+      `crop_image`, ни генерации) и пишет результат в `./decomposition/rectified/`.
+- [x] Верификация `measureResidualSkew` ≤ `stages.rectify.residualSkewLimitDeg`
+      (0.8°), иначе результат не считается улучшением
+      (`stages.rectify.minImprovementDeg`, 0.4°) и файл удаляется.
+- [x] Цикл re-correct: если наклон не уменьшился, роль спрашивается ещё раз, а в
+      тексте задачи стоит измеренный остаток; попыток — `stages.rectify.maxAttempts`.
+- [x] Split-pass: если роль не дала ни одного файла (`unresolved`), идёт второй
+      проход с бюджетом `stages.rectify.maxSplitTurns` и заданием «порезать
+      картинку на экраны по одному».
+- [x] Коллаж: один quad → один экран; один исходник может дать несколько экранов,
+      тогда он распадается на несколько экранов в `state.screens`.
+- [x] Артефакты → `./decomposition/rectified/`; принятые файлы заменяют исходник в
+      `state.screens`, `state.screensFiles` и `state.images` (пути — POSIX-relative),
+      отвергнутые не остаются на диске.
+
+Проверено: `test/rectify.test.js` (14 тестов) — правило приёмки по наклону,
+инструменты роли и каталог выхода, ровный кадр остаётся на месте, исправленный файл
+заменяет исходник, файл вне каталога выхода не результат, файл без улучшения
+удаляется, re-correct и split-pass (бюджет и текст второй попытки), коллаж
+распадается на два экрана, разбор ответа роли, проверка файла результата,
+`swapReferencePaths`, пороги наклона в конфиге.
+Общий прогон: `npm test` → 89/89.
+
+Критерий готовности: экран, спроецированный по углам, принимается только когда
+измеримый остаточный наклон меньше исходного — закрыт.
 
 ---
 

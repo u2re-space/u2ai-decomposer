@@ -103,6 +103,11 @@ function validateStage(id, section, fail) {
       if (key in section && !(Number.isSafeInteger(section[key]) && section[key] >= 0)) fail(`${where}.${key}: целое ≥ 0`);
     }
   }
+  if (id === 'rectify') {
+    for (const key of ['residualSkewLimitDeg', 'minImprovementDeg']) {
+      if (!(Number.isFinite(section[key]) && section[key] >= 0)) fail(`${where}.${key}: число ≥ 0`);
+    }
+  }
   if (id === 'resolve' && typeof section.layers !== 'boolean') fail(`${where}.layers: true | false`);
 }
 
