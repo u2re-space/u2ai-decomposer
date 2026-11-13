@@ -744,15 +744,16 @@ export async function rasterCrop({ input, output, x = 0, y = 0, width, height, c
  * copied from the untouched source file rather than resampled. A model that returns a different
  * frame size (the families that round to their own grid) is scaled back onto the box, so the patch
  * always lands where the crop was taken and the screen keeps its original dimensions.
- * @param {{ input: string, patch: string, output: string, x: number, y: number, width?: number|null, height?: number|null, cwd: string, signal?: AbortSignal, engine?: string }} options
+ * @param {{ input: string, patch: string, output: string, x: number, y: number, width?: number|null, height?: number|null, cwd: string, signal?: AbortSignal, engine?: string, blend?: boolean }} options
  *   `width`/`height` override the box the patch is stretched to; by default the patch keeps its own
  *   size, which is the crop size when it comes back unchanged.
+ *   `blend` composites the patch over the base by its alpha; without it the patch replaces the box.
  * @returns {Promise<{ rel: string, bytes: number, width: number, height: number, box: {x:number,y:number,width:number,height:number}, resized: boolean }>}
  * @exports
  * @ai.hint io
  */
 export async function rasterPatch({
-    input, patch, output, x = 0, y = 0, width = null, height = null, cwd = process.cwd(), signal, engine = 'auto',
+    input, patch, output, x = 0, y = 0, width = null, height = null, cwd = process.cwd(), signal, engine = 'auto', blend = false,
 }) {
     const baseBytes = await readFile(toAbs(cwd, input));
     const patchBytes = await readFile(toAbs(cwd, patch));
@@ -779,10 +780,34 @@ export async function rasterPatch({
     // let the damaged pixel show through underneath. The source row is counted from the top of the
     // patch — `box.y` belongs to the base frame only. Reading the patch at `box.y + row` offsets the
     // copy by the box position and runs past a patch that is shorter than the base, so every stitch
-    // below row 0 used to fail with a buffer-range error.
+    // below row 0 used to fail with a buffer-range error. `blend` is the opt-in exception used by
+    // the extension seam: a feathered patch is composited over the untouched source.
     for (let row = 0; row < box.height; row++) {
         const from = (row * box.width) * 4;
-        frame.data.copy(base.data, ((box.y + row) * base.width + box.x) * 4, from, from + box.width * 4);
+        const to = ((box.y + row) * base.width + box.x) * 4;
+        if (!blend) {
+            frame.data.copy(base.data, to, from, from + box.width * 4);
+            continue;
+        }
+        for (let column = 0; column < box.width; column++) {
+            const sourceAt = from + column * 4;
+            const targetAt = to + column * 4;
+            const alpha = frame.data[sourceAt + 3] / 255;
+            if (alpha >= 1) {
+                frame.data.copy(base.data, targetAt, sourceAt, sourceAt + 4);
+            } else if (alpha > 0) {
+                for (let channel = 0; channel < 3; channel++) {
+                    base.data[targetAt + channel] = Math.round(
+                        frame.data[sourceAt + channel] * alpha
+                        + base.data[targetAt + channel] * (1 - alpha),
+                    );
+                }
+                base.data[targetAt + 3] = Math.round(
+                    frame.data[sourceAt + 3] * alpha
+                    + base.data[targetAt + 3] * (1 - alpha),
+                );
+            }
+        }
     }
 
     const png = await encodePng(base, engine);

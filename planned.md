@@ -1,6 +1,6 @@
 # План перехода: Universal-AI (монолит 0.2.xx) → @u2ai/decomposer (0.3.xx)
 
-> Актуальный статус: **шаги 1–5 завершены**, следующий — шаг 6 (стадия extension).
+> Актуальный статус: **шаги 1–6 завершены**, следующий — шаг 7 (стадия decompose).
 > Рабочий дом переносимого кода: `submodules/u2ai-decomposer/`.
 
 ---
@@ -229,14 +229,26 @@ decomposer на mock-клиенте с валидным DECOMPOSER_SCHEMA и too
 
 ---
 
-## 6. Стадия extension (port `archive/reference-phases/extend.js`) — ⏳
+## 6. Стадия extension (port `archive/reference-phases/extend.js`) — ✅ ЗАВЕРШЕН
 
-- [ ] Локальный pad канвы: `stages.extend.padFraction` от длинной стороны → полоса.
-- [ ] Роль `extender` пишет prompt продолжения полосы (EXTEND_SCHEMA).
-- [ ] Приём по шву: генерация → `seamDelta` против `image.seamDeltaMin`,
-      до `maxAttempts` попыток.
-- [ ] Band-stitch через `rasterPatch` (перекрывающийся шов, feather).
-- [ ] Артефакты → `./decomposition/extended/`, состояние `state.canvas`.
+- [x] Локальный pad канвы: `stages.extend.padFraction` от длинной стороны → полоса;
+      исходные пиксели остаются в левом верхнем углу без ресемплирования.
+- [x] Роль `extender` пишет prompt продолжения полосы (EXTEND_SCHEMA).
+- [x] Приём по шву: генерация → `seamDelta` против `image.seamDeltaMin`,
+      до `stages.extend.maxAttempts` попыток; порог объединяет цветовой drift
+      и долю изменённых seam-пикселей.
+- [x] Band-stitch через `rasterPatch`: перекрывающийся шов, alpha-feather;
+      исходная область берётся из исходного файла, из ответа — только полоса.
+- [x] Артефакты → `./decomposition/extended/`, состояние `state.canvas`.
+
+Проверено: `test/extension.test.js` — расчёт целевого холста, seam-метрика,
+успешный band-stitch с сохранением исходных пикселей, отказ при сдвинутом шве,
+повтор до `maxAttempts`, отсутствие артефакта у отклонённого ответа.
+Дополнительно: `test/cli.test.js` — dry-run печатает план, не создаёт каталоги
+и не вызывает клиент. Общий прогон: `npm test` → 55/55.
+
+Критерий готовности: роль `extender` даёт план, локально выросший холст
+проходит seam-проверку, а итоговый файл сохраняет исходные пиксели — закрыт.
 
 ---
 
