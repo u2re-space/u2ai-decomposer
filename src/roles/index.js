@@ -105,14 +105,29 @@ export function resolveRole(config, name, { model = null, effort = null } = {}) 
  */
 export function createRoleRunner({ client, config = {}, model = null, effort = null, toolset = null, skills = null, onEvent = null } = {}) {
     /**
+     * Tell the reader what the role is doing right now.
+     *
+     * The call itself may take minutes — a reasoning model with a picture is slow — and a
+     * silent terminal looks like a hung one. The reader gets a line instead of a silence.
+     * @param {string} type the name of the event
+     * @param {object} payload the details of the event
+     * @returns {void}
+     */
+    function notifyRole(type, payload) {
+        if (!onEvent) return;
+        try { onEvent({ type, ...payload }); } catch { /* an observer never breaks a run */ }
+    }
+
+    /**
      * Run one role.
      * @param {string} name role name
-     * @param {{ text: string, parts?: object[], instructions?: string|null, schema?: object|null, schemaName?: string|null, maxTurns?: number, model?: string|null, effort?: string|null, signal?: AbortSignal|null, extraTools?: object[] }} [params]
+     * @param {{ text: string, parts?: object[], instructions?: string|null, schema?: object|null, schemaName?: string|null, maxTurns?: number, model?: string|null, effort?: string|null, signal?: AbortSignal|null, extraTools?: object[], stream?: boolean|null }} [params]
      * @returns {Promise<{ status: string, data: object|null, text: string, toolCalls: object[], usage: object|null, error: string|null, model: string|null, trace: object[] }>}
      */
     async function run(name, {
         text = '', parts = [], instructions = null, schema = null, schemaName = null,
         maxTurns = 1, model: runModel = null, effort: runEffort = null, signal = null, extraTools = null,
+        stream: runStream = null,
     } = {}) {
         const role = resolveRole(config, name, { model: runModel ?? model, effort: runEffort ?? effort });
         const skillText = typeof skills?.[name] === 'string' ? skills[name].trim() : '';
@@ -129,6 +144,10 @@ export function createRoleRunner({ client, config = {}, model = null, effort = n
                 ? toolset.specsFor(name, role.tools ?? null)
                 : (toolset?.specs ?? null)
         );
+        // A streamed answer keeps the connection alive while the model thinks and lets the
+        // reader see that the work is going on. A host that does not serve the route as a
+        // stream is answered again without the flag by the client.
+        const stream = runStream ?? config?.streaming !== false;
         const trace = [];
         const items = [];
         let last = null;
@@ -136,6 +155,7 @@ export function createRoleRunner({ client, config = {}, model = null, effort = n
         try {
             const turns = Math.max(1, Number.isSafeInteger(maxTurns) ? maxTurns : 1);
             for (let turn = 0; turn < turns; turn++) {
+                notifyRole('role.start', { role: name, model: role.model, effort: role.effort, turn: turn + 1, turns });
                 const answer = await client.responses.create({
                     model: role.model,
                     instructions: roleInstructions,
@@ -147,10 +167,15 @@ export function createRoleRunner({ client, config = {}, model = null, effort = n
                     effort: role.effort,
                     signal,
                     onEvent,
+                    stream,
                 });
                 const parsed = parseResponse(answer);
                 last = parsed;
                 for (const call of parsed.toolCalls) trace.push({ tool: call.name, args: call.arguments });
+                notifyRole('role.done', {
+                    role: name, model: parsed.model ?? role.model, status: parsed.status,
+                    usage: parsed.usage, toolCalls: parsed.toolCalls.length,
+                });
 
                 if (!parsed.toolCalls.length || !toolset) break;
 

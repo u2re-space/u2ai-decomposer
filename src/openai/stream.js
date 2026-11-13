@@ -169,6 +169,23 @@ export function createStreamReducer({ emit = () => {} } = {}) {
          */
         get response() { return response; },
         /**
+         * The final response, with the output items the stream carried.
+         *
+         * A gateway may send the `response.completed` event without the body of the
+         * response. The items the stream carried are then the only source of the answer,
+         * so they are put back into the response: a lost output would look like an empty
+         * answer to the caller.
+         * @returns {object|null}
+         * @ai.hint pure
+         */
+        finalResponse() {
+            if (!response) return null;
+            const output = Array.isArray(response.output) && response.output.length ? response.output : [...items.values()];
+            if (!output.length) return response;
+            if (output === response.output) return response;
+            return { ...response, output };
+        },
+        /**
          * Last SSE sequence_number, or null when none has arrived.
          * @returns {number|null}
          * @ai.hint pure

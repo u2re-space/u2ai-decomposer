@@ -71,6 +71,10 @@ export function fromEnv(env = process.env) {
   if (retries != null) set(['retries'], retries);
   const timeoutMs = intInRange(env.AI_DECOMPOSE_TIMEOUT_MS, 5_000, 600_000);
   if (timeoutMs != null) set(['timeoutMs'], timeoutMs);
+  const imageTimeoutMs = intInRange(env.AI_DECOMPOSE_IMAGE_TIMEOUT_MS, 5_000, 1_800_000);
+  if (imageTimeoutMs != null) set(['imageTimeoutMs'], imageTimeoutMs);
+  if (env.AI_DECOMPOSE_STREAMING === '0' || env.AI_DECOMPOSE_STREAMING === 'false') set(['streaming'], false);
+  else if (env.AI_DECOMPOSE_STREAMING === '1' || env.AI_DECOMPOSE_STREAMING === 'true') set(['streaming'], true);
   const maxTurns = intInRange(env.AI_DECOMPOSE_MAX_TURNS, 1, 200);
   if (maxTurns != null) set(['limits', 'maxTurns'], maxTurns);
 

@@ -145,7 +145,13 @@ export async function main(argv = process.argv.slice(2)) {
     const renderer = isTTY
         ? createRenderer({ verbose: opts.verbose })
         : createPlainRenderer({ verbose: opts.verbose });
-    const client = await createClient({ config, signal: null });
+    // The events of the transport go to the reader too: a retry or a host that fell out
+    // is something the user has to know, not something to hide in a log.
+    const client = await createClient({
+        config,
+        signal: null,
+        onEvent: (event) => renderer.event(event),
+    });
 
     try {
         const result = await runPipeline({

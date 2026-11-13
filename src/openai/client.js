@@ -161,6 +161,47 @@ export function resolveBackends(config, { kind = 'text', model = null, env = pro
 }
 
 /**
+ * The stall timeout of one route.
+ *
+ * The timeout is not a budget of the whole call: it is the time the host may stay silent.
+ * A text call that is streamed keeps sending events while the model thinks, so the window
+ * only fires when the host really stops. An image call has no stream at all — the picture
+ * comes in one piece — so it needs a window of its own, longer than the text one.
+ *
+ * @param {object} config the loaded configuration
+ * @param {'text'|'images'} kind the route
+ * @returns {number} the milliseconds of silence the host may keep
+ * @exports
+ * @ai.hint pure
+ */
+export function requestTimeoutMs(config, kind = 'text') {
+    if (kind === 'images') {
+        const value = Number(config?.imageTimeoutMs);
+        if (Number.isSafeInteger(value) && value >= 5_000) return value;
+        return 900_000;
+    }
+    const value = Number(config?.timeoutMs);
+    if (Number.isSafeInteger(value) && value >= 5_000) return value;
+    return 600_000;
+}
+
+/**
+ * Did the host refuse the route because of the `stream` flag?
+ *
+ * A gateway that serves the Responses route but not as a stream answers with a 400 and
+ * the word "stream" in the message. The caller repeats the request without the flag.
+ * @param {object} error the error of the call
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function streamUnsupported(error) {
+    const status = Number(error?.status ?? 0);
+    if (status !== 400 && status !== 422 && status !== 501) return false;
+    return /stream/i.test(String(error?.message ?? ''));
+}
+
+/**
  * Create an API client for the configured backends.
  *
  * The client owns the transport only: it knows the routes, the retries and the rotation
@@ -170,7 +211,7 @@ export function resolveBackends(config, { kind = 'text', model = null, env = pro
  */
 export async function createClient({ config, env = process.env, signal = null, onEvent = null } = {}) {
     const transport = createHttp({
-        idleTimeoutMs: Number.isSafeInteger(config?.timeoutMs) ? config.timeoutMs : 120_000,
+        idleTimeoutMs: requestTimeoutMs(config, 'text'),
         connectTimeoutMs: 30_000,
     });
     const retries = Number.isSafeInteger(config?.limits?.requestRetries)
@@ -211,13 +252,13 @@ export async function createClient({ config, env = process.env, signal = null, o
      * Send one request to one backend, with the configured number of retries.
      * @param {object} backend
      * @param {string} path route relative to the base URL
-     * @param {{ method?: string, body?: object, rawBody?: Buffer|string, contentType?: string, signal?: AbortSignal|null, stream?: boolean, onEvent?: Function|null }} options
+     * @param {{ method?: string, body?: object, rawBody?: Buffer|string, contentType?: string, signal?: AbortSignal|null, stream?: boolean, onEvent?: Function|null, idleTimeout?: number }} options
      * @returns {Promise<object>}
      * @ai.hint io
      */
     async function send(backend, path, {
         method = 'POST', body = null, rawBody = null, contentType = 'application/json',
-        signal: callSignal = null, stream = false, onEvent = null,
+        signal: callSignal = null, stream = false, onEvent = null, idleTimeout = null,
     } = {}) {
         const root = normalizeBaseURL(backend.baseURL);
         const url = new URL(path, root);
@@ -241,6 +282,7 @@ export async function createClient({ config, env = process.env, signal = null, o
                     headers,
                     body: rawBody !== null ? rawBody : (body !== null ? JSON.stringify(body) : undefined),
                     signal: callSignal ?? signal,
+                    idleTimeout: idleTimeout ?? undefined,
                 });
             } catch (error) {
                 const wrapped = error instanceof ApiError
@@ -291,17 +333,19 @@ export async function createClient({ config, env = process.env, signal = null, o
      * The channels below need it: a task id belongs to the host that created it.
      * @param {object} backend
      * @param {string} path route relative to the base URL
-     * @param {{ method?: string, body?: object, rawBody?: Buffer|string, contentType?: string, signal?: AbortSignal|null, stream?: boolean, onEvent?: Function|null, model?: string|null }} options
+     * @param {{ method?: string, body?: object, rawBody?: Buffer|string, contentType?: string, signal?: AbortSignal|null, stream?: boolean, onEvent?: Function|null, model?: string|null, idleTimeout?: number|null }} options
      * @returns {Promise<object>}
      * @ai.hint io
      */
     async function callBackend(backend, path, {
         method = 'POST', body = null, rawBody = null, contentType = 'application/json',
         signal: callSignal = null, stream = false, onEvent: callEvent = null, model = null,
+        idleTimeout: callTimeout = null,
     } = {}) {
         announce({ type: 'request.start', backend: backend.baseURL, path, model });
         const { res } = await send(backend, path, {
             method, body, rawBody, contentType, signal: callSignal, stream, onEvent: callEvent,
+            idleTimeout: callTimeout,
         });
         return stream
             ? await readStream(res.body, { kind: stream === 'chat' ? 'chat' : 'responses', model, onEvent: callEvent })
@@ -323,7 +367,7 @@ export async function createClient({ config, env = process.env, signal = null, o
             reducer.handle(event);
         }
         if (reducer.streamError) throw reducer.streamError;
-        return reducer.response;
+        return reducer.finalResponse ? reducer.finalResponse() : reducer.response;
     }
 
     /**
@@ -336,12 +380,15 @@ export async function createClient({ config, env = process.env, signal = null, o
     async function call(path, {
         method = 'POST', body = null, rawBody = null, contentType = 'application/json',
         kind = 'text', model = null, signal: callSignal = null, stream = false,
-        onEvent: callEvent = null, supports = null,
+        onEvent: callEvent = null, supports = null, idleTimeout: callTimeout = null,
     } = {}) {
         const chain = resolveBackends(config, { kind, model, env });
         if (!chain.length) {
             throw new ApiError('No backend is configured for this request.', { code: 'NO_BACKEND' });
         }
+        // The window of silence depends on the route: an image comes in one piece, a text
+        // answer streams.
+        const timeout = callTimeout ?? requestTimeoutMs(config, kind);
         let lastError = null;
         for (const backend of chain) {
             if (supports && backend.supports?.[supports] === false) {
@@ -351,6 +398,7 @@ export async function createClient({ config, env = process.env, signal = null, o
             try {
                 const answer = await callBackend(backend, path, {
                     method, body, rawBody, contentType, signal: callSignal, stream, onEvent: callEvent, model,
+                    idleTimeout: timeout,
                 });
                 return answer;
             } catch (error) {
@@ -392,6 +440,16 @@ export async function createClient({ config, env = process.env, signal = null, o
             });
             return answer;
         } catch (error) {
+            // A host that serves the route but not as a stream: the same request without
+            // the flag still answers, it just arrives in one piece.
+            if (stream && streamUnsupported(error)) {
+                announce({ type: 'transport.adjust', reason: 'the host does not serve the route as a stream' });
+                const answer = await call('responses', {
+                    method: 'POST', body, kind: 'text', model: wantedModel, signal: callSignal,
+                    stream: false, onEvent: callEvent, supports: 'responses',
+                });
+                return answer;
+            }
             if (!responsesRouteUnsupported(error)) throw error;
             const gaps = chatGaps(body);
             if (gaps.length) {

@@ -166,6 +166,8 @@ export function validateConfig(config) {
   if (!['auto', 'disabled'].includes(c.truncation)) fail('truncation: auto | disabled');
   if (!Number.isSafeInteger(c.retries) || c.retries < 0 || c.retries > 10) fail('retries: 0..10');
   if (!Number.isSafeInteger(c.timeoutMs) || c.timeoutMs < 5_000 || c.timeoutMs > 600_000) fail('timeoutMs: 5000..600000');
+  if (!Number.isSafeInteger(c.imageTimeoutMs) || c.imageTimeoutMs < 5_000 || c.imageTimeoutMs > 1_800_000) fail('imageTimeoutMs: 5000..1800000');
+  if (typeof c.streaming !== 'boolean') fail('streaming: true | false');
 
   validateBackendList(c.backends, 'backends', fail);
   validateBackendList(c.imagesBackends, 'imagesBackends', fail);

@@ -115,6 +115,32 @@ The section of the resolve stage:
 | `textRecognition` | Ask the model for the OCR of the text layers |
 | `layerPrompt` | The prompt of the decomposition (the tight-box wording by default; `""` sends no prompt) |
 
+### Progress and long requests
+
+A stage of the pipeline may take minutes: a reasoning model reads a picture, a picture
+model paints a band. The CLI keeps a live line under the stage header — what the model is
+doing right now and how long it has been doing it:
+
+```
+▶ Extend reference
+⠹ the extender role is answering (moonshotai/kimi-k3.1-pro) · 1 m 12 s
+```
+
+The roles ask for a streamed answer, so the host keeps sending events while the model
+thinks. Retries, a host that fell out and a host that refuses the stream are printed,
+not hidden. When the output is piped, the same events are written as plain lines.
+
+| Field | Meaning | Default |
+|-------|---------|---------|
+| `timeoutMs` | The window of silence the text host may keep (5 000…600 000 ms) | `600000` |
+| `imageTimeoutMs` | The same window for the image route (5 000…1 800 000 ms) | `900000` |
+| `streaming` | Ask the roles for a streamed answer | `true` |
+
+The windows are stalls, not budgets: a streamed answer keeps the connection awake while
+the model thinks, and a picture comes in one piece, so the image route gets a longer
+window. The env names are `AI_DECOMPOSE_TIMEOUT_MS`, `AI_DECOMPOSE_IMAGE_TIMEOUT_MS` and
+`AI_DECOMPOSE_STREAMING`.
+
 ## Lineage
 
 The phases were ported from the monolith `Universal-AI` (0.2.xx), where they lived in

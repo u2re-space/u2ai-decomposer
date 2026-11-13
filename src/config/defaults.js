@@ -29,7 +29,19 @@ export const defaults = {
   models: {},
   reasoning: { effort: 'medium', summary: 'auto', mode: null },
   retries: 3,
-  timeoutMs: 120_000,
+  /**
+   * The window of silence the text host may keep before the request is given up.
+   * It is not a budget of the call: a streamed answer keeps sending events while the
+   * model thinks, so the window only fires when the host really stops talking.
+   */
+  timeoutMs: 600_000,
+  /**
+   * The same window for the image route. A picture comes in one piece — there is no
+   * stream to keep the connection awake — so the window is longer.
+   */
+  imageTimeoutMs: 900_000,
+  /** Ask the roles for a streamed answer, so a slow call shows its progress. */
+  streaming: true,
 
   // --- HTTP backends -------------------------------------------------------
   /**
