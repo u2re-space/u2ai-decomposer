@@ -2,7 +2,7 @@
  * @file src/shared/pipeline.js
  * @module shared/pipeline
  * @purpose Pipeline orchestrator: runs stages in order, passes artifacts between them.
- * @depends node:path, node:fs/promises
+ * @depends node:path, node:fs/promises, shared/manifest, shared/resume
  * @exports STAGES, runPipeline
  * @ai.tags pipeline, stages
  * @ai.hint keep
@@ -15,6 +15,8 @@ import { loadSkills } from '../agent/skills.js';
 import { connectMcpServers } from '../agent/mcp.js';
 import { STAGE_DEFS, STAGE_DIRS, STAGE_ROLES } from '../stages/index.js';
 import { DECOMPOSITION_FILE } from '../stages/resolve.js';
+import { saveStageManifest } from './manifest.js';
+import { resumeFromWorkDir } from './resume.js';
 
 /**
  * Ordered stage definitions.
@@ -133,6 +135,10 @@ export async function runPipeline({
         warnings: [],
     };
 
+    // A run that starts in the middle of the pipeline continues from the artifacts of the last
+    // one: the stages before it are not repeated, they cost money and their answer is on disk.
+    await resumeFromWorkDir(state, { stages: toRun.map((stage) => stage.id), notify });
+
     const failed = await runStages(toRun, state, notify);
 
     for (const connection of mcp) await connection.close().catch(() => {});
@@ -168,6 +174,9 @@ export async function runStages(stages, state, notify = () => {}) {
         for (const message of state.warnings.slice(before)) {
             notify({ type: 'warning', message });
         }
+        // What the stage produced is written down: a run that starts in the middle of the
+        // pipeline continues from it instead of paying for the stages before it again.
+        await saveStageManifest(state, stage.id).catch(() => {});
         notify({ type: 'stage.done', stage: stage.id });
     }
     return failed;

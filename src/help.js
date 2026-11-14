@@ -18,6 +18,8 @@ Options:
   --stages <name,...>     Comma-separated list of stages to run.
                           Default: extend,decompose,rectify,reconstruct,overlap,resolve
                           Available: extend, decompose, rectify, reconstruct, overlap, resolve
+                          A stage may run alone: it takes the screens of the last run
+                          from the work directory and the stages before it are not repeated.
   -m, --model <name>      AI model override.
   --image-model <name>    Image editing model override.
   --effort <level>        Reasoning effort: low | medium | high | xhigh.

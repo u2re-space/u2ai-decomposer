@@ -60,6 +60,31 @@ ai-decompose -i collage.png --stages decompose,rectify
 ai-decompose -i original.png --advanced --out ./output
 ```
 
+### Running one stage on its own
+
+A stage may be run alone, on the artifacts of the last run:
+
+```bash
+ai-decompose -i collage.png --stages reconstruct   # the restorer on the screens of the last run
+ai-decompose -i collage.png --stages overlap       # the overlap on the restored screens
+ai-decompose -i collage.png --stages resolve       # the final JSON of what is on the disk
+```
+
+The stages before it are not repeated — they cost money, and their answer is already written
+down. The run takes the screens from the work directory of the last run (`decomposition/rectified`,
+`decomposition/restored`, …), says where they came from and goes on:
+
+```
+  the screens of the last run are used: 3 file(s) from decomposition/rectified
+```
+
+Every stage writes what it produced into `decomposition/manifest.json`, so the names of the
+screens and the files they ended up in survive the run. Without a manifest the pictures of the
+directories are read instead, and the name of a screen is taken from the name of its file.
+
+The stage that cuts the screens is the one that cannot be skipped: without it there is nothing to
+continue from, and the stage works on the pictures of `--image` instead.
+
 ## Architecture
 
 ### Roles (src/roles/*.js)

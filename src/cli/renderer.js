@@ -201,6 +201,12 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'decompose.done':
                 console.log(`  screens: ${e.screens}, files: ${e.files}`);
                 break;
+            case 'resume':
+                console.log(`  the screens of the last run are used: ${e.files} file(s) from ${e.dir}`);
+                break;
+            case 'resume.empty':
+                console.log('  there is nothing to continue from: the stage works on the pictures of the run');
+                break;
             case 'decompose.report':
                 if (verbose) console.log(e.report);
                 break;
@@ -462,6 +468,12 @@ export function createRenderer({ verbose = false } = {}) {
                 break;
             case 'decompose.done':
                 say(paint(`  screens: ${e.screens}, files: ${e.files}`, COLORS.dim));
+                break;
+            case 'resume':
+                say(paint(`  the screens of the last run are used: ${e.files} file(s) from ${e.dir}`, COLORS.dim));
+                break;
+            case 'resume.empty':
+                say(paint('  there is nothing to continue from: the stage works on the pictures of the run', COLORS.dim));
                 break;
             case 'decompose.report':
                 if (verbose) say(e.report);
