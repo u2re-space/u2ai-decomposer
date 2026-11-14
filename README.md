@@ -215,7 +215,8 @@ where it belongs: it names the four corners of every screen and the harness proj
 1. **The AI straightens the reference first.** The reference is sent to the image editor as a whole
    picture, and the answer is measured: the residual tilt of the straightened picture has to be no
    worse than the tilt of the original. A straightening that does not flatten the reference is
-   thrown away, and the stage goes on with the original bytes.
+   thrown away, and the stage goes on with the original bytes. The straightened pictures live in
+   `decomposition/straightened/` — the reference itself is never overwritten.
 2. **The cut is still made by the geometry.** The screens are cut out of the straightened reference
    by the same corners and the same projection as in the `geometry` mode — the AI does not draw the
    screens, it only gives the geometry a better picture to cut.

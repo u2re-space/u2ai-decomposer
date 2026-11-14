@@ -14,9 +14,26 @@
 import { runExtension, EXTENDED_DIR } from './extension.js';
 import { runDecompose } from './decompose.js';
 import { runRectify, RECTIFIED_DIR } from './rectify.js';
+import { runRectifyAi } from './rectify-ai.js';
 import { runReconstruct, RESTORED_DIR } from './reconstruct.js';
 import { runOverlap, OVERLAP_DIR } from './overlap.js';
 import { runResolve, DECOMPOSITION_FILE, LAYERS_DIR } from './resolve.js';
+
+/**
+ * The rectify stage in the mode the config asks for.
+ *
+ * The default mode is the geometry one: the role names the corners and the harness projects the
+ * pixels. The `ai-mode` puts the AI in front of the whole reference first and keeps the geometry
+ * behind it.
+ * @param {object} state pipeline state
+ * @param {Function} notify event callback
+ * @returns {Promise<void>}
+ */
+const runRectifyStage = (state, notify) => (
+    state.config?.stages?.rectify?.mode === 'ai-mode'
+        ? runRectifyAi(state, notify)
+        : runRectify(state, notify)
+);
 
 /**
  * The six stages of the pipeline, in the order they run. The order is fixed: a stage may only
@@ -26,7 +43,7 @@ import { runResolve, DECOMPOSITION_FILE, LAYERS_DIR } from './resolve.js';
 export const STAGE_DEFS = Object.freeze([
     { id: 'extend', label: 'Extend reference', role: 'extender', run: runExtension, dir: EXTENDED_DIR },
     { id: 'decompose', label: 'Crop to screens', role: 'decomposer', run: runDecompose, dir: 'screens' },
-    { id: 'rectify', label: 'Rectify screens', role: 'rectifier', run: runRectify, dir: RECTIFIED_DIR },
+    { id: 'rectify', label: 'Rectify screens', role: 'rectifier', run: runRectifyStage, dir: RECTIFIED_DIR },
     { id: 'reconstruct', label: 'Restore lost details', role: 'restorer', run: runReconstruct, dir: RESTORED_DIR },
     { id: 'overlap', label: 'Remove overlaps', role: 'overlap', run: runOverlap, dir: OVERLAP_DIR },
     { id: 'resolve', label: 'Resolve final output', role: 'director', run: runResolve, dir: DECOMPOSITION_FILE },

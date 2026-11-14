@@ -524,6 +524,18 @@ export async function runRectify(state, notify = () => {}) {
     const usedPaths = new Map();
     /** Every file of the run that the stage keeps; the cleanup of the output dir spares them. */
     const keptFiles = new Set();
+    /**
+     * The files that were in the output directory before the stage started.
+     *
+     * The cleanup of the output directory removes the files of the current run and keeps the
+     * files of the earlier runs. The time of a file is a poor border between the two: the clock
+     * of the file system and the clock of the process do not agree to the microsecond, and a file
+     * that was written a moment before the run started can look newer than the run itself. The
+     * list of the files is the honest border.
+     */
+    const preexisting = new Set((await readdir(outDir, { withFileTypes: true }))
+        .filter((item) => item.isFile())
+        .map((item) => item.name));
 
     /**
      * Work on one picture: ask the role about it, project the screens it named, keep what passed.
@@ -539,11 +551,6 @@ export async function runRectify(state, notify = () => {}) {
      * @returns {Promise<object[]>} the screens that were accepted
      */
     const processUnit = async (file) => {
-        // The wall-clock time of the start of the work, with a sub-millisecond fraction:
-        // `Date.now()` truncates to the millisecond, and a file written in the same
-        // millisecond as the start of the run would look like a file of this run — the
-        // cleanup of the output directory would delete a file that was there before.
-        const startedAt = performance.timeOrigin + performance.now();
         const located = await resolveInside(root, file.rel, { allowRoot: false }).catch(() => null);
         if (!located) {
             warnings.push(`rectify: ${file.rel} is outside the working directory`);
@@ -1046,8 +1053,7 @@ export async function runRectify(state, notify = () => {}) {
             if (!item.isFile()) continue;
             if (accepted.some((entry) => path.resolve(root, entry.to) === abs)) continue;
             if (keptFiles.has(path.resolve(abs))) continue;
-            const info = await stat(abs).catch(() => null);
-            if (!info || info.mtimeMs < startedAt) continue;
+            if (preexisting.has(item.name)) continue;
             await unlink(abs).catch(() => {});
         }
 

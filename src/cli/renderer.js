@@ -228,6 +228,10 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'decompose.report':
                 if (verbose) console.log(e.report);
                 break;
+            case 'rectify.straightened':
+                console.log(`  straightened: ${e.file} (${e.before ?? 0}° → ${e.after ?? 0}°)`
+                    + `${e.accepted ? '' : ` — kept the original: ${e.reason}`}`);
+                break;
             case 'rectify.done':
                 console.log(`  rectified: ${e.count}`);
                 break;
@@ -517,6 +521,10 @@ export function createRenderer({ verbose = false } = {}) {
                 break;
             case 'decompose.report':
                 if (verbose) say(e.report);
+                break;
+            case 'rectify.straightened':
+                say(paint(`  straightened: ${e.file} (${e.before ?? 0}° → ${e.after ?? 0}°)`
+                    + `${e.accepted ? '' : ` — kept the original: ${e.reason}`}`, COLORS.dim));
                 break;
             case 'rectify.done':
                 say(paint(`  rectified: ${e.count}`, COLORS.dim));
