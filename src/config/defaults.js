@@ -65,7 +65,17 @@ export const defaults = {
   ],
   /** Per-model host lists: { "<model>": [{ baseURL, apiKey?, prefix?, vendor?, suffix?, type? }] }. */
   modelsBackends: {},
-  fallback: { enabled: true, models: {} },
+  /**
+   * The models to try when the picture model refuses the request — no balance, no route.
+   * Key: the model that failed, value: the list of models that get the request next.
+   * The hosts of `imagesBackends` are tried first; a model of this list is the next step.
+   */
+  fallback: {
+    enabled: true,
+    models: {
+      'openai/gpt-image-2.6-sunburst': ['openai/gpt-image-2.6-flare'],
+    },
+  },
 
   // --- limits ---------------------------------------------------------------
   limits: {
@@ -129,9 +139,10 @@ export const defaults = {
       enabled: true,
       /**
        * Fraction of the long edge to grow the canvas by (0 disables the stage
-       * even when enabled). 0.25 adds a quarter-frame band around the art.
+       * even when enabled). 0.125 adds an eighth-frame band around the art —
+       * enough for a status bar or a row of buttons, not a whole extra screen.
        */
-      padFraction: 0.25,
+      padFraction: 0.125,
       /** Max verify-and-stitch attempts on the extended band. */
       maxAttempts: 2,
     },
@@ -160,6 +171,8 @@ export const defaults = {
       residualSkewLimitDeg: 0.8,
       /** How much flatter the result has to be than the source. */
       minImprovementDeg: 0.4,
+      /** Let the role look at its own cut and cut it again when a screen lost its edges. */
+      review: true,
     },
     reconstruct: {
       enabled: true,
@@ -250,7 +263,8 @@ export function defaultConfigText() {
     reasoning: { effort: 'xhigh', summary: 'auto' },
     backends: structuredClone(defaults.backends),
     imagesBackends: structuredClone(defaults.imagesBackends),
-    stages: { extend: { padFraction: 0.25 }, resolve: { layers: false } },
+    fallback: structuredClone(defaults.fallback),
+    stages: { extend: { padFraction: 0.125 }, resolve: { layers: false } },
   };
   return `${JSON.stringify(starter, null, 2)}\n`;
 }

@@ -31,9 +31,17 @@ it maps the four corners you name onto a rectangle of that quad's own size. Name
 can see — a collage of three phones is three screens, not one — and give the four corners of each
 one, even the screen that is only partly visible at the edge of the picture.
 
+The corners belong to the screen itself: the four outer corners of the display area of the device,
+where the picture of the screen meets the body of the device. Not the content inside the screen —
+a title, a card, a row of icons is content, and a screen cut on the content loses its own margins,
+its status bar and its last row. Include the whole display: its own margin, the status bar at the
+top and the bar at the bottom. Leave a few pixels of margin outside the display, so that the edge
+of the screen is not clipped. The body of the device, the frame around the display and the
+background of the picture are not part of the screen.
+
 When a projection is needed, call correct_perspective once per screen with the four corners of that
-screen's content. Coordinates are pixels of the image you were given. Name the corners of the
-interface itself, in the order a viewer reads that interface.
+screen. Coordinates are pixels of the image you were given. Name the corners in the order a viewer
+reads that interface.
 
 Write every result into the directory the task names, one file per screen. Never write over a reference.
 Read what the tool answers. A small number means the screen is level.

@@ -2,7 +2,7 @@
  * @file src/agent/schemas.js
  * @module agent/schemas
  * @purpose JSON schemas for AI role responses: decomposer, extender, rectifier, restorer.
- * @exports SUB_REFERENCE_KINDS, DECOMPOSER_KINDS, DECOMPOSER_SCHEMA, DECOMPOSER_INLINE_SCHEMA, EXTEND_SCHEMA, RECTIFY_SCHEMA, RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA
+ * @exports SUB_REFERENCE_KINDS, DECOMPOSER_KINDS, DECOMPOSER_SCHEMA, DECOMPOSER_INLINE_SCHEMA, EXTEND_SCHEMA, RECTIFY_SCHEMA, RECTIFY_REVIEW_SCHEMA, RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA
  * @ai.tags schema
  * @ai.hint keep
  * @ai.hint legacy-0.2
@@ -134,6 +134,30 @@ export const RECTIFY_SCHEMA = object({
                 br: { ...quadCorner, description: 'Bottom-right corner.' },
                 bl: { ...quadCorner, description: 'Bottom-left corner.' },
             }), description: 'Four corners passed to correct_perspective.' },
+        }),
+    },
+});
+
+/**
+ * The answer of the review of a cut: the role looks at the screens it produced and says whether
+ * they are complete.
+ */
+export const RECTIFY_REVIEW_SCHEMA = object({
+    verdict: { type: 'string', enum: ['ok', 'recut'], description: 'ok=every screen is complete, recut=a screen was cut off.' },
+    assessment: { ...string, description: 'What the comparison of the cuts with the reference showed.' },
+    screens: {
+        type: 'array',
+        maxItems: 8,
+        description: 'One entry per screen that has to be cut again.',
+        items: object({
+            label: { ...string, description: 'Screen label — the same label as before.' },
+            output: { ...string, description: 'Path of the new file, when the role wrote one.' },
+            quad: { ...object({
+                tl: { ...quadCorner, description: 'Top-left corner.' },
+                tr: { ...quadCorner, description: 'Top-right corner.' },
+                br: { ...quadCorner, description: 'Bottom-right corner.' },
+                bl: { ...quadCorner, description: 'Bottom-left corner.' },
+            }), description: 'Four corners, wider than before.' },
         }),
     },
 });

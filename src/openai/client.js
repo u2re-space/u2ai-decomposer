@@ -25,6 +25,7 @@ import { buildResponsesBody } from './responses.js';
 import {
     backgroundValue, encodeMultipart, imageSizeFields, imageSources, sniffImage,
 } from './images.js';
+import { fallbackChain } from './fallback.js';
 
 /** Statuses worth another try on the same backend. */
 const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
@@ -555,16 +556,36 @@ export async function createClient({ config, env = process.env, signal = null, o
                 model = null, prompt, size = null, format = null, quality = null, background = null,
                 n = null, signal: callSignal = null,
             } = {}) {
-                const usedModel = model ?? config?.imageModel ?? config?.model ?? null;
-                const fields = imageSizeFields({ size, model: usedModel, format, quality });
-                const body = { model: usedModel, prompt, ...fields };
-                if (n) body.n = n;
-                const bg = backgroundValue({ model: usedModel, format, background });
-                if (bg) body.background = bg;
-                const answer = await call('images/generations', {
-                    method: 'POST', body, kind: 'images', model: usedModel, signal: callSignal, supports: 'images',
-                });
-                return { images: await imageBytes(answer, callSignal), raw: answer };
+                const wanted = model ?? config?.imageModel ?? config?.model ?? null;
+                // The hosts of `imagesBackends` are tried one after another inside `call`. When every
+                // one of them refuses the model — no balance, no route — the next model of the
+                // fallback chain gets the request.
+                const chain = fallbackChain(config, wanted);
+                let lastError = null;
+                for (const [index, candidate] of chain.entries()) {
+                    try {
+                        const fields = imageSizeFields({ size, model: candidate, format, quality });
+                        const body = { model: candidate, prompt, ...fields };
+                        if (n) body.n = n;
+                        const bg = backgroundValue({ model: candidate, format, background });
+                        if (bg) body.background = bg;
+                        const answer = await call('images/generations', {
+                            method: 'POST', body, kind: 'images', model: candidate, signal: callSignal, supports: 'images',
+                        });
+                        return { images: await imageBytes(answer, callSignal), raw: answer, model: candidate };
+                    } catch (error) {
+                        lastError = error;
+                        const next = chain[index + 1];
+                        if (!next) throw error;
+                        announce({
+                            type: 'model.fallback',
+                            from: candidate,
+                            to: next,
+                            error: error?.message ?? String(error),
+                        });
+                    }
+                }
+                throw lastError ?? new ApiError('No model answered the request.', { code: 'NO_MODEL' });
             },
 
             /**
@@ -577,35 +598,52 @@ export async function createClient({ config, env = process.env, signal = null, o
                 model = null, prompt, image, mask = null, size = null, format = null, quality = null,
                 background = null, n = null, signal: callSignal = null,
             } = {}) {
-                const usedModel = model ?? config?.imageModel ?? config?.model ?? null;
-                const fields = imageSizeFields({ size, model: usedModel, format, quality });
-                const bg = backgroundValue({ model: usedModel, format, background });
-                const form = {
-                    model: usedModel,
-                    prompt,
-                    ...fields,
-                    ...(n ? { n: String(n) } : {}),
-                    ...(bg ? { background: bg } : {}),
-                };
-                const files = [{
-                    field: 'image',
-                    filename: image?.filename ?? 'image.png',
-                    mime: image?.mime ?? sniffImage(image?.bytes).mime,
-                    bytes: image?.bytes ?? Buffer.alloc(0),
-                }];
-                if (mask?.bytes) {
-                    files.push({
-                        field: 'mask',
-                        filename: mask.filename ?? 'mask.png',
-                        mime: mask.mime ?? sniffImage(mask.bytes).mime,
-                        bytes: mask.bytes,
-                    });
+                const wanted = model ?? config?.imageModel ?? config?.model ?? null;
+                const chain = fallbackChain(config, wanted);
+                let lastError = null;
+                for (const [index, candidate] of chain.entries()) {
+                    try {
+                        const fields = imageSizeFields({ size, model: candidate, format, quality });
+                        const bg = backgroundValue({ model: candidate, format, background });
+                        const form = {
+                            model: candidate,
+                            prompt,
+                            ...fields,
+                            ...(n ? { n: String(n) } : {}),
+                            ...(bg ? { background: bg } : {}),
+                        };
+                        const files = [{
+                            field: 'image',
+                            filename: image?.filename ?? 'image.png',
+                            mime: image?.mime ?? sniffImage(image?.bytes).mime,
+                            bytes: image?.bytes ?? Buffer.alloc(0),
+                        }];
+                        if (mask?.bytes) {
+                            files.push({
+                                field: 'mask',
+                                filename: mask.filename ?? 'mask.png',
+                                mime: mask.mime ?? sniffImage(mask.bytes).mime,
+                                bytes: mask.bytes,
+                            });
+                        }
+                        const { body: rawBody, contentType } = encodeMultipart({ fields: form, files });
+                        const answer = await call('images/edits', {
+                            method: 'POST', rawBody, contentType, kind: 'images', model: candidate, signal: callSignal, supports: 'images',
+                        });
+                        return { images: await imageBytes(answer, callSignal), raw: answer, model: candidate };
+                    } catch (error) {
+                        lastError = error;
+                        const next = chain[index + 1];
+                        if (!next) throw error;
+                        announce({
+                            type: 'model.fallback',
+                            from: candidate,
+                            to: next,
+                            error: error?.message ?? String(error),
+                        });
+                    }
                 }
-                const { body: rawBody, contentType } = encodeMultipart({ fields: form, files });
-                const answer = await call('images/edits', {
-                    method: 'POST', rawBody, contentType, kind: 'images', model: usedModel, signal: callSignal, supports: 'images',
-                });
-                return { images: await imageBytes(answer, callSignal), raw: answer };
+                throw lastError ?? new ApiError('No model answered the request.', { code: 'NO_MODEL' });
             },
         },
 

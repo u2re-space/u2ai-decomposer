@@ -107,6 +107,7 @@ function validateStage(id, section, fail) {
     for (const key of ['residualSkewLimitDeg', 'minImprovementDeg']) {
       if (!(Number.isFinite(section[key]) && section[key] >= 0)) fail(`${where}.${key}: число ≥ 0`);
     }
+    if ('review' in section && typeof section.review !== 'boolean') fail(`${where}.review: true | false`);
   }
   if (id === 'resolve') {
     if (typeof section.layers !== 'boolean') fail(`${where}.layers: true | false`);

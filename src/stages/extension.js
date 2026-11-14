@@ -84,7 +84,7 @@ export function extenderPrompt(authored) {
  * @param {string|string[]} edges the edges to grow
  * @returns {{ width: number, height: number, band: number, offsets: { top: number, right: number, bottom: number, left: number } }|null}
  */
-export function extensionTarget(size, padFraction = 0.25, edges = 'bottom') {
+export function extensionTarget(size, padFraction = 0.125, edges = 'bottom') {
     const width = Number(size?.width);
     const height = Number(size?.height);
     const fraction = Number(padFraction);
@@ -347,7 +347,7 @@ export async function runExtension(state, notify = () => {}) {
     }
 
     const settings = config.stages?.extend ?? {};
-    const padFraction = Number(settings.padFraction ?? 0.25);
+    const padFraction = Number(settings.padFraction ?? 0.125);
     const maxAttempts = Number.isSafeInteger(settings.maxAttempts) ? settings.maxAttempts : 2;
     const seamLimit = Number(config.image?.seamDeltaMin ?? 0.25);
     const seamFraction = Number(config.image?.seamBandFraction ?? 0.06);

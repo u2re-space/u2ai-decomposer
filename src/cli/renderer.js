@@ -162,6 +162,9 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'request.error':
                 console.warn(`  the host failed: ${e.error}`);
                 break;
+            case 'model.fallback':
+                console.warn(`  the model ${e.from} failed: ${e.error} — trying ${e.to}`);
+                break;
             case 'request.skip':
                 console.log(`  the host ${e.backend} is skipped: ${e.reason}`);
                 break;
@@ -203,6 +206,9 @@ export function createPlainRenderer({ verbose = false } = {}) {
                 break;
             case 'rectify.projected':
                 console.log(`  projected: ${e.file}${e.screen ? ` (${e.screen})` : ''}`);
+                break;
+            case 'rectify.recut':
+                console.log(`  re-cut: ${e.file}${e.screen ? ` (${e.screen})` : ''} — the screen was cut off`);
                 break;
             case 'rectify.file':
                 console.log(`  rectified: ${e.file}${e.screen ? ` (${e.screen})` : ''}`);
@@ -414,6 +420,9 @@ export function createRenderer({ verbose = false } = {}) {
             case 'request.error':
                 say(paint(`  ⚠ the host failed: ${e.error}`, COLORS.yellow));
                 break;
+            case 'model.fallback':
+                say(paint(`  ⚠ the model ${e.from} failed: ${e.error} — trying ${e.to}`, COLORS.yellow));
+                break;
             case 'request.skip':
                 say(paint(`  · the host ${e.backend} is skipped: ${e.reason}`, COLORS.dim));
                 break;
@@ -452,6 +461,9 @@ export function createRenderer({ verbose = false } = {}) {
                 break;
             case 'rectify.projected':
                 say(paint(`  projected: ${e.file}${e.screen ? ` (${e.screen})` : ''}`, COLORS.dim));
+                break;
+            case 'rectify.recut':
+                say(paint(`  re-cut: ${e.file}${e.screen ? ` (${e.screen})` : ''} — the screen was cut off`, COLORS.dim));
                 break;
             case 'rectify.file':
                 say(paint(`  rectified: ${e.file}${e.screen ? ` (${e.screen})` : ''}`, COLORS.dim));

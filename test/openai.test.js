@@ -364,6 +364,51 @@ test('the client edits an image and returns PNG bytes', async () => {
     }
 });
 
+test('the picture request goes to the next model when the first one refuses it', async () => {
+    const server = await startServer((req, res, body) => {
+        if (req.url === '/v1/images/generations') {
+            const model = JSON.parse(body).model;
+            if (model === 'openai/gpt-image-2.6-sunburst') {
+                // The host has no balance for this model.
+                res.writeHead(402).end(JSON.stringify({ detail: 'Insufficient balance to run this request.' }));
+                return;
+            }
+            sendJson(res, { data: [{ b64_json: PNG_1PX.toString('base64') }] });
+            return;
+        }
+        res.writeHead(404).end('{}');
+    });
+    try {
+        const client = await createClient({
+            config: {
+                baseURL: server.url,
+                apiKey: 'test',
+                imagesBackends: [{ baseURL: server.url, apiKey: 'test' }],
+                fallback: {
+                    enabled: true,
+                    models: { 'openai/gpt-image-2.6-sunburst': ['openai/gpt-image-2.6-flare'] },
+                },
+            },
+            env: {},
+        });
+        const events = [];
+        const answer = await client.images.generate({
+            model: 'openai/gpt-image-2.6-sunburst',
+            prompt: 'a cat in space',
+            size: '1024x1024',
+            format: 'png',
+        });
+        assert.equal(answer.model, 'openai/gpt-image-2.6-flare');
+        assert.equal(answer.images.length, 1);
+        const models = server.calls.map((call) => JSON.parse(call.body).model);
+        assert.deepEqual(models, ['openai/gpt-image-2.6-sunburst', 'openai/gpt-image-2.6-flare']);
+        void events;
+        client.close();
+    } finally {
+        await server.close();
+    }
+});
+
 test('the client generates an image and returns PNG bytes', async () => {
     const server = await startServer((req, res) => {
         if (req.url === '/v1/images/generations') {

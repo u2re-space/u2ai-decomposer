@@ -72,6 +72,9 @@ const stateFor = (root, roles, overrides = {}) => ({
                 maxAttempts: 2,
                 residualSkewLimitDeg: 0.8,
                 minImprovementDeg: 0.4,
+                // The review of the cut is a stage of its own: the tests that count the calls of
+                // the role turn it off, and the tests of the review turn it on.
+                review: false,
             },
         },
     },
@@ -436,6 +439,125 @@ test('a sub-reference that carries work of its own is not a crop of the referenc
         null);
     assert.equal(cropOfReference({ rel: 'a.png', kind: 'crop', source: 'other.png' }, references), null);
     assert.equal(cropOfReference(null, references), null);
+});
+
+// ---------------------------------------------------------------------------
+// The review of the cut
+// ---------------------------------------------------------------------------
+
+/** A state whose rectify stage reviews its own cut. */
+const reviewState = (root, roles) => {
+    const state = stateFor(root, roles);
+    state.config.stages.rectify.review = true;
+    return state;
+};
+
+test('the role looks at its own cut and cuts it again when it lost its edges', async () => {
+    const root = await workDirWith();
+    try {
+        const calls = [];
+        const state = reviewState(root, mockRoles([
+            // The first answer: a cut that is too narrow.
+            {
+                verdict: 'rectified',
+                assessment: 'three phones',
+                screens: [{
+                    label: 'home',
+                    output: '',
+                    quad: { tl: { x: 40, y: 40 }, tr: { x: 240, y: 40 }, br: { x: 240, y: 200 }, bl: { x: 40, y: 200 } },
+                }],
+            },
+            // The review: the screen was cut off, here are wider corners.
+            {
+                verdict: 'recut',
+                assessment: 'the left edge of the display was cut off',
+                screens: [{
+                    label: 'home',
+                    output: '',
+                    quad: { tl: { x: 10, y: 10 }, tr: { x: 300, y: 10 }, br: { x: 300, y: 230 }, bl: { x: 10, y: 230 } },
+                }],
+            },
+        ], calls));
+
+        await runRectify(state, () => {});
+
+        assert.equal(calls.length, 2, 'the role is asked about the cut it made');
+        assert.equal(calls[1].params.schemaName, 'rectifyReview');
+        assert.equal(calls[1].params.parts.length, 2, 'the reference and the cut are both in the answer');
+        assert.match(calls[1].params.text, /cut off/i);
+
+        const accepted = state.rectified.find((item) => item.to);
+        assert.ok(accepted, state.warnings.join('; '));
+        const frame = await sharp(path.join(root, accepted.to)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        assert.equal(frame.info.width, 290, 'the re-cut is the wide one');
+        assert.equal(frame.info.height, 220);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('a re-cut that is smaller than the cut it replaces is refused', async () => {
+    const root = await workDirWith();
+    try {
+        const calls = [];
+        const state = reviewState(root, mockRoles([
+            {
+                verdict: 'rectified',
+                assessment: 'three phones',
+                screens: [{
+                    label: 'home',
+                    output: '',
+                    quad: { tl: { x: 40, y: 40 }, tr: { x: 240, y: 40 }, br: { x: 240, y: 200 }, bl: { x: 40, y: 200 } },
+                }],
+            },
+            {
+                verdict: 'recut',
+                assessment: 'the screen was cut off',
+                screens: [{
+                    label: 'home',
+                    output: '',
+                    quad: { tl: { x: 60, y: 60 }, tr: { x: 200, y: 60 }, br: { x: 200, y: 180 }, bl: { x: 60, y: 180 } },
+                }],
+            },
+        ], calls));
+
+        await runRectify(state, () => {});
+
+        const accepted = state.rectified.find((item) => item.to);
+        const frame = await sharp(path.join(root, accepted.to)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        assert.equal(frame.info.width, 200, 'the first cut stays');
+        assert.match(state.warnings.join(' '), /smaller than the cut it replaces/);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('a cut the role is happy with stays as it is', async () => {
+    const root = await workDirWith();
+    try {
+        const calls = [];
+        const state = reviewState(root, mockRoles([
+            {
+                verdict: 'rectified',
+                assessment: 'three phones',
+                screens: [{
+                    label: 'home',
+                    output: '',
+                    quad: { tl: { x: 40, y: 40 }, tr: { x: 240, y: 40 }, br: { x: 240, y: 200 }, bl: { x: 40, y: 200 } },
+                }],
+            },
+            { verdict: 'ok', assessment: 'every screen is complete', screens: [] },
+        ], calls));
+
+        await runRectify(state, () => {});
+
+        assert.equal(calls.length, 2);
+        const accepted = state.rectified.find((item) => item.to);
+        const frame = await sharp(path.join(root, accepted.to)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        assert.equal(frame.info.width, 200, 'the first cut stays');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
 });
 
 // ---------------------------------------------------------------------------

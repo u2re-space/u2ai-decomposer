@@ -91,12 +91,41 @@ canvas is padded around them, not stretched), the editor paints only into the em
 the harness stitches the bands back over the untouched source, fading the seam along the side
 that touches the picture. A picture cut at the top and at the bottom grows at both ends.
 
+The band is an eighth of the long side (`stages.extend.padFraction`, 0.125 by default): enough
+for a status bar or a row of buttons, not for another whole screen. A 1024×768 picture that is
+cut at the top and at the bottom becomes 1024×1024.
+
+### Falling back when a host refuses
+
+The picture request tries every host of `imagesBackends` first. When all of them refuse the
+model — no balance, no route — the request goes to the next model of `fallback.models`:
+
+```json
+{
+  "fallback": {
+    "enabled": true,
+    "models": {
+      "openai/gpt-image-2.6-sunburst": ["openai/gpt-image-2.6-flare"]
+    }
+  }
+}
+```
+
+The key is the model that failed, the value is the list of models that get the request next. The
+run reports every step of the chain: `the model … failed — trying …`.
+
 ### Cutting a collage into screens
 
 The `decomposer` names every screen of the picture and gives the rectangle of each one; the
 `rectifier` places the four corners of every screen it sees. When a role names the corners but
 does not write the file, the stage runs the projection itself — the projection is the cut, so
 a collage of three phones becomes three screens even when the model forgot the tool call.
+
+The corners belong to the **display area of the device**, not to the content inside it: a cut
+made on a title or a card loses the margins of the screen, its status bar and its last row. The
+role is told so, and the stage checks the result: after the cut, the role looks at the reference
+and at the screens it produced and says whether a screen was cut off. A screen that lost its
+edges is cut again, with wider corners (`stages.rectify.review`, on by default).
 
 The collage is cut out of the **reference**, not out of the crops the `decomposer` made of it:
 the reference is the ground truth of the picture, and a model that reads three tilted phones as
@@ -150,6 +179,7 @@ split is slow or fails.
 - Env prefix: `AI_DECOMPOSE_`
 - Substitutions: `{{env:NAME}}`
 - Backends and imagesBackends pools
+- fallback.models: the models that get a picture request when every host refused the model
 
 The section of the resolve stage:
 

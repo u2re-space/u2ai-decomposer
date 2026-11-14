@@ -35,12 +35,12 @@ export async function padToSize(bytes, { targetWidth = null, targetHeight = null
  *
  * @param {Buffer} bytes
  * @param {{ fraction?: number, engine?: string, alphaThreshold?: number }} [options]
- *   `fraction` is a share of the long side; 0.25 adds a quarter-frame around the art.
+ *   `fraction` is a share of the long side; 0.125 adds an eighth-frame around the art.
  * @returns {Promise<{ bytes: Buffer, width: number, height: number, band: number }>}
  * @exports
  * @ai.hint io
  */
-export async function padBand(bytes, { fraction = 0.25, engine = 'auto', alphaThreshold = 0.05 } = {}) {
+export async function padBand(bytes, { fraction = 0.125, engine = 'auto', alphaThreshold = 0.05 } = {}) {
     const frame = await decodeRgba(bytes, engine);
     const band = Math.max(1, Math.round(Math.max(frame.width, frame.height) * Math.max(0, fraction)));
     const width = frame.width + band * 2;

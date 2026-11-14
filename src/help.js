@@ -33,6 +33,8 @@ Pipeline stages:
                   Any edge, several edges at once.
   decompose       Split reference into ordered screens with sub-references.
   rectify         Un-rotate / recover projection, cut collages into screens.
+                  The role checks its own cut and cuts it again when a screen
+                  lost its edges.
   reconstruct     Restore lost details via AI box-patch and verify.
   overlap         Remove overlapping elements from/by other screens (AI).
   resolve         Assemble final decomposition.json + layers (advanced).
@@ -44,6 +46,8 @@ Config:
   Stored in ~/.ai-decompose/config.json.
   Environment variables prefixed with AI_DECOMPOSE_.
   Supports {{env:NAME}} substitutions.
+  The picture hosts of imagesBackends are tried one by one; when all of them
+  refuse the model, the next model of fallback.models gets the request.
 
 Examples:
   ai-decompose -i screenshot.png

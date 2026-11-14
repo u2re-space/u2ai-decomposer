@@ -17,16 +17,16 @@
  *   image/raster, image/skew, openai/responses, openai/images, roles/index
  * @usedBy shared/pipeline
  * @exports runRectify, acceptsRectification, producedScreens, validateRectifiedFile,
- *   swapReferencePaths, quadCorners, screenFileName, projectQuad, opaqueShare, RECTIFIED_DIR,
- *   MAX_RESIDUAL_DEG, MIN_IMPROVEMENT_DEG, RECTIFIER_TOOLS
+ *   swapReferencePaths, quadCorners, screenFileName, projectQuad, opaqueShare, referenceFiles,
+ *   cropOfReference, RECTIFIED_DIR, MAX_RESIDUAL_DEG, MIN_IMPROVEMENT_DEG, RECTIFIER_TOOLS
  * @ai.tags rectification, perspective, screens
  * @ai.hint keep
  * @ai.hint legacy-0.2
  */
 
 import path from 'node:path';
-import { mkdir, readFile, stat, unlink } from 'node:fs/promises';
-import { RECTIFY_SCHEMA } from '../agent/schemas.js';
+import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
+import { RECTIFY_SCHEMA, RECTIFY_REVIEW_SCHEMA } from '../agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 import { resolveInside, toPosix } from '../agent/paths.js';
 import { toolSpecs } from '../agent/tool-specs.js';
@@ -300,6 +300,73 @@ async function askRectifier({ root, roles, file, frame, outDirRel, extraTools, m
 }
 
 /**
+ * Ask the rectifier role to look at the screens it produced.
+ *
+ * A cut is easy to get wrong in a way nobody notices: the corners land on the content instead of
+ * on the edge of the display, and the screen that comes out is a few pixels too narrow — a title
+ * runs out of the frame, the margin of the display is gone. The role sees the reference and the
+ * cuts side by side, so it can say which screen was cut off and place the corners again.
+ * @param {{ root: string, roles: object, file: { rel: string, abs: string }, frame: object,
+ *   outDirRel: string, extraTools: object[]|null, model: string|null, effort: string|null,
+ *   maxTurns: number, cuts: Array<{ to: string }> }} params
+ * @returns {Promise<object>} the answer of the role runner
+ * @ai.hint io
+ */
+async function reviewCuts({
+    root, roles, file, frame, outDirRel, extraTools, model, effort, maxTurns, cuts,
+}) {
+    const bytes = await readFile(file.abs);
+    const parts = [imagePart(bytes, sniffImage(bytes).mime)];
+    const names = [];
+    for (const cut of cuts) {
+        const cutBytes = await readFile(path.resolve(root, cut.to)).catch(() => null);
+        if (!cutBytes) continue;
+        parts.push(imagePart(cutBytes, sniffImage(cutBytes).mime));
+        names.push(cut.to);
+    }
+    const text = [
+        `Reference: ${file.rel}`,
+        `Size: ${frame.width}×${frame.height} pixels. Every coordinate you place belongs to this file.`,
+        '',
+        'The first picture is the reference. The pictures after it are the screens you cut out of it:',
+        ...names.map((name, index) => `  ${index + 1}. ${name}`),
+        '',
+        'Look at every cut: is any part of the screen missing — the margin of the display, the status',
+        'bar, a title, a card or a row that runs out of the frame? A cut that is too narrow loses the',
+        'edges of the screen, and the reader of the result sees a chopped screen.',
+        'If every screen is complete, answer "ok" and name nothing.',
+        'If a screen was cut off, answer "recut", name that screen with the same label as before, and',
+        'place its four corners again, wider than before: on the outer edge of the display area of the',
+        'device, outside the display rather than inside the content. Project it again, or name the',
+        'corners and the stage will project them.',
+    ].join('\n');
+    return await roles.run('rectifier', {
+        text,
+        parts,
+        instructions: ROLE_INSTRUCTIONS.rectifier,
+        schema: RECTIFY_REVIEW_SCHEMA,
+        schemaName: 'rectifyReview',
+        maxTurns,
+        extraTools,
+        model,
+        effort,
+    });
+}
+
+/**
+ * The name of a screen, as the role writes it and as the stage compares it.
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ * @ai.hint pure
+ */
+function sameLabel(a, b) {
+    const left = String(a ?? '').trim().toLowerCase();
+    const right = String(b ?? '').trim().toLowerCase();
+    return Boolean(left) && left === right;
+}
+
+/**
  * The screens the stage works on: the files the decompose stage produced, or the images of the
  * state when the stage runs on its own.
  * @param {object} state pipeline state
@@ -388,6 +455,8 @@ export async function runRectify(state, notify = () => {}) {
     const maxTurns = Number.isSafeInteger(settings.maxTurns) ? settings.maxTurns : 24;
     const maxSplitTurns = Number.isSafeInteger(settings.maxSplitTurns) ? settings.maxSplitTurns : 32;
     const maxAttempts = Number.isSafeInteger(settings.maxAttempts) ? Math.max(1, settings.maxAttempts) : 2;
+    // The role looks at its own cut and says whether a screen lost its edges.
+    const review = settings.review !== false;
 
     const outDir = path.join(root, workDir, RECTIFIED_DIR);
     await mkdir(outDir, { recursive: true });
@@ -576,6 +645,70 @@ export async function runRectify(state, notify = () => {}) {
                 continue;
             }
             kept.push({ from: file.rel, kept: true, reason: 'no screen passed the tilt check' });
+        }
+
+        // The cut is checked by the role itself: a screen that lost its edges is cut again.
+        if (accepted.length && review) {
+            const answer = await reviewCuts({
+                root,
+                roles,
+                file: { rel: file.rel, abs: located.abs },
+                frame,
+                outDirRel,
+                extraTools,
+                model,
+                effort,
+                maxTurns,
+                cuts: accepted,
+            }).catch(() => null);
+            const wanted = answer?.data?.verdict === 'recut' ? producedScreens(answer.data) : [];
+            for (const [index, entry] of wanted.entries()) {
+                const target = accepted.find((item) => sameLabel(item.screen, entry.label)) ?? accepted[index];
+                if (!target) continue;
+                const targetAbs = path.resolve(root, target.to);
+                const before = await readFile(targetAbs).catch(() => null);
+                const beforeFrame = before ? await rasterInfo(targetAbs, { cwd: root, engine }).catch(() => null) : null;
+                let written = null;
+                if (entry.quad) {
+                    written = await projectQuad({
+                        source: located.abs,
+                        outDir,
+                        label: target.screen || entry.label,
+                        quad: entry.quad,
+                        index,
+                        name: path.basename(target.to),
+                        cwd: root,
+                        engine,
+                    });
+                } else if (entry.output) {
+                    // The role wrote the file itself: it is the new cut, and it replaces the old one.
+                    const abs = path.isAbsolute(entry.output) ? path.resolve(entry.output) : path.resolve(root, entry.output);
+                    const valid = await validateRectifiedFile(abs, outDir);
+                    if (valid.ok) {
+                        await writeFile(targetAbs, await readFile(abs));
+                        written = targetAbs;
+                    }
+                }
+                if (!written) continue;
+                const filled = await opaqueShare(written, engine);
+                if (filled < 0.5) {
+                    // The re-cut is empty: the old cut stays where it was.
+                    if (before) await writeFile(targetAbs, before);
+                    warnings.push(`rectify: ${target.to}: the re-cut was not accepted — the projection is empty`);
+                    continue;
+                }
+                const afterFrame = await rasterInfo(written, { cwd: root, engine }).catch(() => null);
+                if (beforeFrame?.width && afterFrame?.width
+                    && afterFrame.width * afterFrame.height < beforeFrame.width * beforeFrame.height) {
+                    // A screen that lost its edges is cut too narrow; a re-cut that is smaller than
+                    // the cut it replaces is not a repair.
+                    if (before) await writeFile(targetAbs, before);
+                    warnings.push(`rectify: ${target.to}: the re-cut was smaller than the cut it replaces — `
+                        + 'the old cut stays');
+                    continue;
+                }
+                notify({ type: 'rectify.recut', file: target.to, screen: target.screen });
+            }
         }
 
         return accepted;
