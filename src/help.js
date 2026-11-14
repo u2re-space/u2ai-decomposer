@@ -26,6 +26,9 @@ Options:
   --advanced              Enable advanced mode (layer split: seedream-5.5 or the director role).
   --dry-run               Show what would be done without executing.
   --stop-after <stage>    Stop after this stage (inclusive).
+  --batch                 Submit the requests of the parallel rounds as one batch
+                          and stop: the answers are not here yet.
+  --batch-fetch           Take the answers of the submitted batches and go on.
   -v, --verbose           Verbose output.
   -h, --help              Show this help message.
   --version               Show version.
@@ -65,6 +68,14 @@ Config:
   serve seedream-5.5 (APIMart by default, key in APIMART_API_KEY), and
   stages.resolve.layerModel names the model. Without a key the text role
   splits the screen instead.
+
+Batch:
+  The hosts that serve the batch route carry the flag "supports": { "batch": true }
+  in the config. Only the stages whose calls run in parallel are batched.
+  The route is two-phase: --batch submits the requests of a round as one batch
+  and stops (exit code 2), --batch-fetch takes the answers and goes on. The
+  answers are kept in a journal under the output directory, so nothing is paid
+  for twice. A batch that is not ready yet leaves the exit code 3.
 
 Examples:
   ai-decompose -i screenshot.png

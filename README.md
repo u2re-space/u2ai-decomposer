@@ -334,6 +334,48 @@ as transparent PNGs with a bounding box in the coordinates of the base picture.
 Without the key the run does not fail: the text role splits the screen instead, and the run says
 so (`no image backend of the layer route has a key — the text role splits the screen instead`).
 
+### Batch (cheaper calls)
+
+Some hosts serve the OpenAI batch route: a file of requests goes out as one batch, the host works
+on it in the background, and the answers come back later. A batch costs about half the price of
+the same requests one by one.
+
+Only the stages whose calls run in parallel are batched — the `reconstruct` stage works on all
+the screens at once, and the plan of every screen is one request of the round. A round of one
+request is not a batch: it goes the usual way.
+
+The route is two-phase, because the answers are not here when the requests go out:
+
+```bash
+ai-decompose -i collage.png --batch          # the requests go out as a batch, the run stops
+ai-decompose -i collage.png --batch-fetch    # the answers are taken, the run goes on
+```
+
+The first run ends with the exit code 2 and the id of the batch; the second one ends with the
+exit code 3 while the batch is not done yet (the host may need hours — the window is 24 h).
+
+The two phases share a journal under the output directory (`decomposition/.batch`): every request
+is named by the hash of its body, and every answer is kept under that name. The second phase asks
+the same question and takes the answer from the journal instead of paying for it again. The bytes
+of a picture edit are kept there too — an edit is not a part of a batch, but it sits between the
+two phases of the run just the same.
+
+A host takes part in a batch only when the config says so:
+
+```json
+{
+  "backends": [
+    { "baseURL": "https://api.proxyapi.ru/v1", "env": "PROXYAPI_API_KEY", "supports": { "batch": true } },
+    { "baseURL": "https://sprutdock.ru/v1", "env": "SPRUTDOCK_API_KEY", "supports": { "batch": true } }
+  ],
+  "batch": { "enabled": false }
+}
+```
+
+`batch.enabled` turns the route on for every run; the flags `--batch` and `--batch-fetch` turn it
+on for one run. A batch that the host refuses is not the end of the run: the requests of that
+batch go one by one after all.
+
 ### Config
 
 - File: `~/.ai-decompose/config.json`
