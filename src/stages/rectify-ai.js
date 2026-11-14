@@ -17,7 +17,12 @@
  *   reference has to be flatter than the original, and a repair has to be better than the picture
  *   it replaces. What does not pass the gate is rolled back, and the original bytes stay.
  *
- * @depends node:path, node:fs/promises, stages/rectify, stages/repair, image/skew, openai/images
+ *   The overlap between the screens is cleaned inside the mode as well: the same work the separate
+ *   overlap stage does, only once. The stage of the pipeline notices that the work is done and
+ *   does not pay for it a second time.
+ *
+ * @depends node:path, node:fs/promises, stages/rectify, stages/repair, stages/overlap, image/skew,
+ *   openai/images
  * @usedBy stages/index
  * @exports runRectifyAi, straightenReference, STRAIGHTENED_DIR, STRAIGHTEN_PROMPT
  * @ai.tags rectification, ai-mode, perspective
@@ -35,6 +40,7 @@ import { rasterCrop, rasterInfo, rasterPatch } from '../image/raster.js';
 import { imageModelFor, sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
 import { runRectify, referenceFiles, opaqueShare, quadCorners, swapReferencePaths } from './rectify.js';
+import { runOverlap } from './overlap.js';
 import { editFragment, prefersStartPicture, verifyRepair } from './repair.js';
 import { editorPrompt, pickPatches, planFragment } from './restore-plan.js';
 
@@ -221,6 +227,7 @@ export async function runRectifyAi(state, notify = () => {}) {
     const aiState = {
         ...state,
         rectified: [],
+        overlapResolved: [],
         references: effective.map((reference) => reference.rel),
         screensFiles: Array.isArray(state.screensFiles)
             ? state.screensFiles.map((file) => ({ ...file, source: remapSource(file, straightened) }))
@@ -232,7 +239,7 @@ export async function runRectifyAi(state, notify = () => {}) {
     // The third part: the AI repairs the fragments that are still broken. The screens of the
     // geometry cut are the input of the repair, and the repaired copies are what the next stage
     // reads.
-    await repairCuts({
+    const repaired = await repairCuts({
         state: aiState,
         notify,
         client,
@@ -247,18 +254,54 @@ export async function runRectifyAi(state, notify = () => {}) {
         warnings,
     });
 
+    // The fourth part: the pieces of the neighbours are cleaned here, inside the mode. The
+    // separate stage of the pipeline finds the work done and does not pay for it again.
+    const cleaned = await cleanOverlap({ state: aiState, notify, warnings, settings });
+
     state.rectified.push(...aiState.rectified);
     state.screens = aiState.screens;
     if (aiState.screensFiles) state.screensFiles = aiState.screensFiles;
+    state.overlapResolved.push(...aiState.overlapResolved);
+    state.overlapCleanedInAiMode = cleaned;
     // The reference of the run points at the screens it was cut into — under the name of the
-    // original reference, so the next stage finds the same picture it would have found.
+    // original reference, so the next stage finds the same picture it would have found. The chain
+    // of the files is followed to the end: the cut, then the repair, then the cleaning.
     const alias = [];
     for (const item of aiState.rectified) {
         alias.push(item);
         const original = sourceOf.get(item.from);
         if (original) alias.push({ ...item, from: original });
     }
-    state.images = swapReferencePaths(images, alias).paths;
+    let paths = swapReferencePaths(images, alias).paths;
+    paths = swapReferencePaths(paths, repaired).paths;
+    paths = swapReferencePaths(paths, aiState.overlapResolved).paths;
+    state.images = paths;
+}
+
+/**
+ * Clean the overlap between the screens inside the ai-mode.
+ *
+ * The work is the work of the overlap stage: the screens are compared side by side, the foreign
+ * regions are named, cut out, cleaned and stitched back into their boxes. The only difference is
+ * where it happens — inside the mode, so the separate stage has nothing left to do and the reader
+ * is not charged twice for the same cleaning.
+ * @param {{ state: object, notify: Function, warnings: string[], settings: object }} params
+ * @returns {Promise<boolean>} whether the overlap was taken care of
+ * @ai.hint io
+ */
+async function cleanOverlap({ state, notify, warnings, settings }) {
+    if (settings.cleanOverlap === false) return false;
+    const files = Array.isArray(state.screensFiles) ? state.screensFiles : [];
+    // One screen has no neighbour: there is nothing to compare it with, and the separate stage
+    // would have nothing to do either.
+    if (files.length < 2) return true;
+    try {
+        await runOverlap(state, notify);
+    } catch (error) {
+        warnings.push(`rectify: the overlap was not cleaned (${error?.message ?? error})`);
+        return false;
+    }
+    return true;
 }
 
 /**
@@ -271,14 +314,14 @@ export async function runRectifyAi(state, notify = () => {}) {
  * @param {{ state: object, notify: Function, client: object, roles: object, model: string|null,
  *   effort: string|null, editorModel: string, settings: object, engine: string, root: string,
  *   workDir: string, warnings: string[] }} params
- * @returns {Promise<void>}
+ * @returns {Promise<Array<{ from: string, to: string }>>} the chain of the repaired files
  * @ai.hint io
  */
 async function repairCuts({
     state, notify, client, roles, model, effort, editorModel, settings, engine, root, workDir, warnings,
 }) {
     const files = Array.isArray(state.screensFiles) ? state.screensFiles : [];
-    if (!files.length) return;
+    if (!files.length) return [];
 
     const maxPasses = Number.isSafeInteger(settings.maxRepairPasses) ? Math.max(1, settings.maxRepairPasses) : 2;
     const maxPatches = Number.isSafeInteger(settings.maxPatches) ? Math.max(1, settings.maxPatches) : 3;
@@ -300,6 +343,8 @@ async function repairCuts({
     await mkdir(outDir, { recursive: true });
     /** The names the repaired screens took, so that two screens never share one file. */
     const usedNames = new Set();
+    /** The chain of the files: the cut that was replaced by the repaired copy. */
+    const chain = [];
 
     for (const [index, file] of files.entries()) {
         const rel = toPosix(file.rel);
@@ -357,8 +402,10 @@ async function repairCuts({
             from: rel,
             patches: result.patches,
         });
+        chain.push({ from: rel, to: result.rel });
     }
     await rm(scratchRoot, { recursive: true, force: true });
+    return chain;
 }
 
 /**

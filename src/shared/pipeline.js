@@ -136,6 +136,9 @@ export async function runPipeline({
         rectified: [],
         restored: [],
         overlapResolved: [],
+        // The ai-mode of the rectify stage cleans the overlap inside itself: the stage of the
+        // pipeline sees the flag and does not pay for the same work twice.
+        overlapCleanedInAiMode: false,
         decomposition: null,
         warnings: [],
     };

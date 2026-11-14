@@ -229,8 +229,12 @@ where it belongs: it names the four corners of every screen and the harness proj
    from the cut. The repaired screens live in `decomposition/repaired/`; the result of the geometry
    stays where it is, and the run points at the repaired file.
 4. **The content of the neighbours is removed in the same stage.** The pieces of the neighbouring
-   screens that came along with the cut are cleaned up here, so the separate `overlap` stage does
-   not pay for the same work twice.
+   screens that came along with the cut are cleaned up here: the screens are compared side by
+   side, the foreign regions are named, cut out, cleaned and stitched back into their boxes. The
+   cleaned screens live in `decomposition/overlap/`, and the run points at them. The separate
+   `overlap` stage of the pipeline sees that the work is done and skips it, so the same cleaning
+   is not paid for twice. The knob `stages.rectify.cleanOverlap` (`true` by default) turns the
+   step off — then the separate stage does the work as usual.
 
 The mode is a setting of the stage:
 

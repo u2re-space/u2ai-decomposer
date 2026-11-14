@@ -271,6 +271,9 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'overlap.done':
                 console.log(`  overlap resolved: ${e.count}`);
                 break;
+            case 'overlap.skipped':
+                console.log(`  overlap skipped: ${e.reason}`);
+                break;
             case 'resolve.layers':
                 if (verbose) console.log(`  layers: ${e.count}`);
                 break;
@@ -571,6 +574,9 @@ export function createRenderer({ verbose = false } = {}) {
                 break;
             case 'overlap.done':
                 say(paint(`  overlap resolved: ${e.count}`, COLORS.dim));
+                break;
+            case 'overlap.skipped':
+                say(paint(`  overlap skipped: ${e.reason}`, COLORS.dim));
                 break;
             case 'resolve.layers':
                 if (verbose) say(`  layers: ${e.count}`);

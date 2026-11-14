@@ -36,6 +36,26 @@ const runRectifyStage = (state, notify) => (
 );
 
 /**
+ * The overlap stage, unless the ai-mode of the rectify stage has cleaned it already.
+ *
+ * The mode cleans the overlap inside the rectify stage, so the work is done once: the separate
+ * stage notices it and does not pay for the same cleaning a second time.
+ * @param {object} state pipeline state
+ * @param {Function} notify event callback
+ * @returns {Promise<void>}
+ */
+const runOverlapStage = async (state, notify) => {
+    if (state.overlapCleanedInAiMode) {
+        notify({
+            type: 'overlap.skipped',
+            reason: 'the ai-mode of the rectify stage has cleaned the overlap already',
+        });
+        return;
+    }
+    await runOverlap(state, notify);
+};
+
+/**
  * The six stages of the pipeline, in the order they run. The order is fixed: a stage may only
  * read what the earlier stages wrote.
  * @type {ReadonlyArray<{ id: string, label: string, role: string, run: Function, dir: string }>}
@@ -45,7 +65,7 @@ export const STAGE_DEFS = Object.freeze([
     { id: 'decompose', label: 'Crop to screens', role: 'decomposer', run: runDecompose, dir: 'screens' },
     { id: 'rectify', label: 'Rectify screens', role: 'rectifier', run: runRectifyStage, dir: RECTIFIED_DIR },
     { id: 'reconstruct', label: 'Restore lost details', role: 'restorer', run: runReconstruct, dir: RESTORED_DIR },
-    { id: 'overlap', label: 'Remove overlaps', role: 'overlap', run: runOverlap, dir: OVERLAP_DIR },
+    { id: 'overlap', label: 'Remove overlaps', role: 'overlap', run: runOverlapStage, dir: OVERLAP_DIR },
     { id: 'resolve', label: 'Resolve final output', role: 'director', run: runResolve, dir: DECOMPOSITION_FILE },
 ]);
 

@@ -339,6 +339,25 @@ const repairPlan = (source = 'screen', region = { x: 10, y: 10, width: 50, heigh
     }],
 });
 
+/** The answer of the overlap role: the strip of the neighbour that stayed in the first screen. */
+const overlapPlan = {
+    verdict: 'overlap',
+    assessment: 'the navigation bar of the collage stayed in the first screen',
+    patches: [{
+        screen: 'home',
+        kind: 'overlap',
+        x: 10,
+        y: 10,
+        width: 40,
+        height: 30,
+        finding: 'the strip of the neighbouring screen is visible in the corner',
+        prompt: 'remove the strip of the neighbouring screen and continue the background of this screen',
+    }],
+};
+
+/** The answer of the overlap role when the screens own their content. */
+const cleanOverlap = { verdict: 'clean', assessment: 'every screen owns its content', patches: [] };
+
 /** A mock that answers every role by its name. */
 const mockRolesByName = (answers, calls = []) => ({
     resolve: () => ({ instructions: 'You are the rectifier.' }),
@@ -419,6 +438,7 @@ test('the AI repairs a broken region of the screen', async () => {
         const roles = mockRolesByName((name, index) => {
             if (name === 'rectifier') return collageAnswer;
             if (name === 'restorerVerify') return { verdict: 'better', reason: 'the seam is gone' };
+            if (name === 'overlap') return cleanOverlap;
             // Only the first screen of the collage is broken.
             return index === 0 ? repairPlan('screen') : { verdict: 'clean', assessment: 'nothing is broken', patches: [] };
         });
@@ -464,6 +484,7 @@ test('the fragment of a region can come from the reference', async () => {
         const roles = mockRolesByName((name) => {
             if (name === 'rectifier') return collageAnswer;
             if (name === 'restorerVerify') return { verdict: 'better', reason: 'the seam is gone' };
+            if (name === 'overlap') return cleanOverlap;
             asked += 1;
             // The first pass takes the pixels of the screen, the second one takes them from the
             // reference: the region of the second pass overlaps the paint of the first one.
@@ -552,6 +573,7 @@ test('a repair that is not better is thrown away', async () => {
         const roles = mockRolesByName((name, index) => {
             if (name === 'rectifier') return collageAnswer;
             if (name === 'restorerVerify') return { verdict: 'worse', reason: 'the lettering was redrawn' };
+            if (name === 'overlap') return cleanOverlap;
             return index === 0 ? repairPlan('screen') : { verdict: 'clean', assessment: 'nothing is broken', patches: [] };
         });
         const state = repairState(root, roles, client);
@@ -561,6 +583,103 @@ test('a repair that is not better is thrown away', async () => {
         assert.equal(state.screens[0].subReference, RECT_REL, 'the screen keeps the bytes it had');
         const files = await readdir(path.join(root, 'decomposition', REPAIRED_DIR)).catch(() => []);
         assert.deepEqual(files, [], 'no repaired file is written');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// The third part of the mode: the overlap is cleaned inside the stage
+// ---------------------------------------------------------------------------
+
+/** The client of the overlap tests: the editor returns the fragment it was given. */
+const echoClient = (edits = []) => ({
+    images: {
+        edit: async (params) => {
+            edits.push(params);
+            return { images: [{ bytes: params.image.bytes, mime: 'image/png' }] };
+        },
+        generate: async () => ({ images: [] }),
+    },
+});
+
+/** The roles of the overlap tests: nothing is broken, the neighbour is in the first screen. */
+const overlapRoles = (calls = []) => mockRolesByName((name) => {
+    if (name === 'rectifier') return collageAnswer;
+    if (name === 'rectifyRepair') return { verdict: 'clean', assessment: 'nothing is broken', patches: [] };
+    if (name === 'restorerVerify') return { verdict: 'better', reason: 'the foreign strip is gone' };
+    if (name === 'overlap') return overlapPlan;
+    return { verdict: 'clean', assessment: 'nothing is broken', patches: [] };
+}, calls);
+
+test('the overlap is cleaned inside the ai-mode', async () => {
+    const root = await repairDir();
+    try {
+        const edits = [];
+        const calls = [];
+        const client = echoClient(edits);
+        const state = repairState(root, overlapRoles(calls), client);
+        const events = [];
+        await runRectifyAi(state, (event) => events.push(event));
+
+        // The overlap role was asked inside the mode, and the editor was asked for the fragment.
+        assert.equal(calls.filter((call) => call.name === 'overlap').length, 1, 'the role is asked once');
+        assert.equal(edits.length, 1, 'the editor is asked once');
+        assert.match(edits[0].prompt, /remove the strip of the neighbouring screen/);
+
+        // The cleaned screen is a file of its own, and the run points at it.
+        const cleaned = state.overlapResolved.find((item) => item.to && item.to !== item.from);
+        assert.equal(cleaned.from, RECT_REL);
+        assert.equal(cleaned.to, 'decomposition/overlap/01-home.png', state.warnings.join('; '));
+        assert.equal(state.screens[0].subReference, 'decomposition/overlap/01-home.png');
+        assert.equal(state.screensFiles[0].rel, 'decomposition/overlap/01-home.png');
+        assert.deepEqual(state.images, [
+            'decomposition/overlap/01-home.png',
+            `decomposition/${RECTIFIED_DIR}/02-detail.png`,
+        ], 'the run points at the cleaned screen and at the screen that was left alone');
+        assert.ok(events.some((event) => event.type === 'overlap.file'), 'the cleaning is shown');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the separate overlap stage does not pay for the cleaning twice', async () => {
+    const root = await repairDir();
+    try {
+        const edits = [];
+        const calls = [];
+        const client = echoClient(edits);
+        const state = repairState(root, overlapRoles(calls), client);
+        await runRectifyAi(state, () => {});
+        assert.equal(calls.filter((call) => call.name === 'overlap').length, 1, 'the mode did the work');
+
+        // The stage of the pipeline runs and finds the work done.
+        const events = [];
+        await stageById('overlap').run(state, (event) => events.push(event));
+        assert.equal(calls.filter((call) => call.name === 'overlap').length, 1, 'the role is not asked again');
+        assert.equal(edits.length, 1, 'the editor is not asked again');
+        assert.ok(events.some((event) => event.type === 'overlap.skipped'), 'the stage says that it has nothing to do');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the overlap is left to the separate stage when the mode does not clean it', async () => {
+    const root = await repairDir();
+    try {
+        const edits = [];
+        const calls = [];
+        const client = echoClient(edits);
+        const state = repairState(root, overlapRoles(calls), client);
+        state.config.stages.rectify.cleanOverlap = false;
+        await runRectifyAi(state, () => {});
+        assert.equal(calls.filter((call) => call.name === 'overlap').length, 0, 'the mode leaves the work alone');
+        assert.equal(state.overlapCleanedInAiMode, false);
+
+        // The separate stage does the work then.
+        await stageById('overlap').run(state, () => {});
+        assert.equal(calls.filter((call) => call.name === 'overlap').length, 1, 'the stage asks the role');
+        assert.equal(edits.length, 1, 'the editor is asked');
     } finally {
         await rm(root, { recursive: true, force: true });
     }
