@@ -14,8 +14,30 @@
  * @ai.hint io
  */
 
-import { readFile, writeFile, readdir, stat, lstat, realpath, unlink, mkdir, rename } from 'node:fs/promises';
+import path from 'node:path';
+import { readFile, writeFile, readdir, stat, lstat, realpath, unlink, mkdir, rename, cp } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+
+/**
+ * The state of a path in the shape the facade expects.
+ *
+ * Node.js gives the methods (`isDirectory()`), and the facade of the access reads the
+ * properties (`isDirectory`): the backend translates, so every backend of the library
+ * answers in one shape.
+ * @param {object} info the answer of Node.js
+ * @returns {object}
+ * @ai.hint pure
+ */
+function state(info) {
+    if (!info) return null;
+    return {
+        size: Number.isFinite(info.size) ? info.size : 0,
+        isDirectory: Boolean(info.isDirectory()),
+        isFile: Boolean(info.isFile()),
+        isSymbolicLink: Boolean(info.isSymbolicLink()),
+        mtimeMs: Number.isFinite(info.mtimeMs) ? info.mtimeMs : 0,
+    };
+}
 
 /**
  * The backend of the file system of Node.js.
@@ -38,7 +60,7 @@ export function createNativeFileSystem() {
         writeFile: (target, bytes) => writeFile(target, bytes),
         /**
          * @param {string} target
-         * @returns {Promise<{ name: string, isDirectory: boolean, isFile: boolean, size: number }[]>}
+         * @returns {Promise<{ name: string, isDirectory: boolean, isFile: boolean, isSymbolicLink: boolean, size: number }[]>}
          */
         readdir: async (target) => {
             const items = await readdir(target, { withFileTypes: true });
@@ -46,9 +68,15 @@ export function createNativeFileSystem() {
             for (const item of items) {
                 let size = 0;
                 if (item.isFile()) {
-                    size = await stat(`${target}/${item.name}`).then((info) => info.size).catch(() => 0);
+                    size = await stat(path.join(target, item.name)).then((info) => info.size).catch(() => 0);
                 }
-                out.push({ name: item.name, isDirectory: item.isDirectory(), isFile: item.isFile(), size });
+                out.push({
+                    name: item.name,
+                    isDirectory: item.isDirectory(),
+                    isFile: item.isFile(),
+                    isSymbolicLink: item.isSymbolicLink(),
+                    size,
+                });
             }
             return out;
         },
@@ -56,12 +84,12 @@ export function createNativeFileSystem() {
          * @param {string} target
          * @returns {Promise<object|null>}
          */
-        stat: (target) => stat(target).catch(() => null),
+        stat: async (target) => state(await stat(target).catch(() => null)),
         /**
          * @param {string} target
          * @returns {Promise<object|null>}
          */
-        lstat: (target) => lstat(target).catch(() => null),
+        lstat: async (target) => state(await lstat(target).catch(() => null)),
         /**
          * @param {string} target
          * @returns {Promise<string>}
@@ -84,6 +112,20 @@ export function createNativeFileSystem() {
          * @returns {Promise<void>}
          */
         rename: (from, to) => rename(from, to),
+        /**
+         * Copy a file or a tree.
+         * @param {string} from
+         * @param {string} to
+         * @param {{ recursive?: boolean, force?: boolean, errorOnExist?: boolean }} [options]
+         * @returns {Promise<void>}
+         */
+        copy: (from, to, options = {}) => cp(from, to, {
+            recursive: true,
+            dereference: false,
+            force: false,
+            errorOnExist: true,
+            ...options,
+        }),
     };
 }
 

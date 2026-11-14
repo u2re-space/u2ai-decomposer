@@ -102,6 +102,9 @@ const access = createAccess({ root: process.cwd() });
 
 await access.fs.writeText('notes/todo.md', '# todo');
 const found = await access.fs.search({ query: 'todo' });
+
+const listing = await access.fs.listFiles('src', { depth: 2, limit: 400 });
+const copied = await access.fs.copy('src/app.js', 'lib/app.js');
 const answer = await access.exec.run('node', ['--version']);
 ```
 
@@ -109,6 +112,12 @@ The rules of the paths live in one place and are never optional: a path may not 
 neither through `..` nor through a symbolic link — the secret files and the secret directories are
 never accessible, and the read-only directories may be read, but never written. `src/agent/paths.js`
 keeps the words of the refusals and borrows the rules from `src/access/paths.js`.
+
+`listFiles` returns the tree of a path as the model reads it: the noisy folders are marked and
+not opened, the dot-files are hidden unless they are asked for, the sizes are in the text, and a
+path that does not exist yet answers with the nearest existing parent. `copy` copies a file or a
+tree under the same rules: no secret, no symbolic link, no directory into itself, and the
+destination must not exist unless `overwrite` is asked for.
 
 ### Roles (src/roles/*.js)
 

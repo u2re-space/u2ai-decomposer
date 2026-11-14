@@ -1302,6 +1302,23 @@ stage»), тесты `test/rectify-ai.test.js` (чистка внутри реж
 
 ---
 
+## 35. Копия библиотеки доступа: список файлов и копирование (step-c6) — ✅ ЗАВЕРШЁН
+
+Слой доступа развивается в `u2ai-server`, остальные пакеты получают его копией: правки
+идут в `u2ai-server` первыми, `src/access/*` расходится копией.
+
+- `src/access/native.js` — операция `copy` (нативный `cp`, `dereference: false`) и состояние
+  пути свойствами (`isDirectory`, `isFile`, `isSymbolicLink`), а не методами Node.js
+- `src/access/memory.js` — копирование файла и поддерева в памяти
+- `src/access/fs.js` — `listFiles(relative, { depth, limit, includeHidden })` и
+  `copy(source, destination, { overwrite })`: правила путей, секреты, запрет симлинков и
+  копирования каталога в себя
+
+Файлы: `src/access/fs.js`, `src/access/memory.js`, `src/access/native.js`, README (EN),
+planned.md (RU). Проверка: `npm test` — 277 тестов, все проходят.
+
+---
+
 ## Порядок работы и зависимости шагов
 
 ```

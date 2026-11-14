@@ -98,6 +98,7 @@ export function createMemoryFileSystem() {
                     name: relative,
                     isDirectory: value.isDirectory,
                     isFile: !value.isDirectory,
+                    isSymbolicLink: false,
                     size: value.bytes ? value.bytes.byteLength : 0,
                 });
             }
@@ -114,6 +115,7 @@ export function createMemoryFileSystem() {
                 size: found.bytes ? found.bytes.byteLength : 0,
                 isDirectory: found.isDirectory,
                 isFile: !found.isDirectory,
+                isSymbolicLink: false,
                 mtimeMs: found.mtimeMs,
             };
         },
@@ -128,6 +130,7 @@ export function createMemoryFileSystem() {
                 size: found.bytes ? found.bytes.byteLength : 0,
                 isDirectory: found.isDirectory,
                 isFile: !found.isDirectory,
+                isSymbolicLink: false,
                 mtimeMs: found.mtimeMs,
             };
         },
@@ -180,6 +183,36 @@ export function createMemoryFileSystem() {
             if (!found) throw missing(from);
             nodes.delete(keyOf(from));
             nodes.set(keyOf(to), found);
+        },
+        /**
+         * Copy a file or a tree.
+         *
+         * The tree of a directory is copied with it: the nodes under the source keep their
+         * names and their bytes, and the destination gets its own copy of them.
+         * @param {string} from
+         * @param {string} to
+         * @param {{ recursive?: boolean, force?: boolean }} [options]
+         * @returns {Promise<void>}
+         */
+        copy: async (from, to, { recursive = true, force = false } = {}) => {
+            const source = keyOf(from);
+            const found = node(from);
+            if (!found) throw missing(from);
+            const target = keyOf(to);
+            if (nodes.has(target) && !force) {
+                const error = new Error(`EEXIST: file already exists, '${to}'`);
+                error.code = 'EEXIST';
+                throw error;
+            }
+            const stamp = Date.now();
+            nodes.set(target, { bytes: found.bytes, isDirectory: found.isDirectory, mtimeMs: stamp });
+            if (!found.isDirectory || !recursive) return;
+            const prefix = `${source}${path.sep}`;
+            for (const [key, value] of [...nodes.entries()]) {
+                if (!key.startsWith(prefix)) continue;
+                const child = path.join(target, path.relative(source, key));
+                nodes.set(child, { bytes: value.bytes, isDirectory: value.isDirectory, mtimeMs: stamp });
+            }
         },
     };
 }
