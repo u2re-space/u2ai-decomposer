@@ -2,7 +2,7 @@
  * @file src/openai/errors.js
  * @module openai/errors
  * @purpose Error types for API failures and cancellation.
- * @exports ApiError, isAbortError
+ * @exports ApiError, isAbortError, outOfCredit
  * @ai.tags errors
  * @ai.hint pure
  * @ai.hint legacy-0.2
@@ -50,3 +50,23 @@ export class ApiError extends Error {
  */
 export const isAbortError = (error) =>
     error?.name === 'AbortError' || error?.code === 'ABORT_ERR';
+
+/**
+ * Did the host refuse because it has no money left?
+ *
+ * A host that is out of credit says so in its own words: a 402, an `insufficient_quota` code or
+ * a plain "Insufficient balance". Such a host serves nothing, so the run remembers it and goes
+ * to the next one instead of paying for the same refusal again.
+ * @param {object} error the error of the call
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function outOfCredit(error) {
+    const status = Number(error?.status ?? 0);
+    if (status === 402) return true;
+    const code = String(error?.apiCode ?? '').toLowerCase();
+    if (code === 'insufficient_quota' || code === 'billing_hard_limit_reached') return true;
+    return /insufficient balance|no balance|insufficient[_ ]quota|quota (?:is )?exceeded|payment required|not enough (?:money|credit|balance)/i
+        .test(String(error?.message ?? ''));
+}

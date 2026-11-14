@@ -273,6 +273,21 @@ test('a host that does not serve the model hands the task to the next one', asyn
     assert.equal(decomposition.layers.length, 0);
 });
 
+test('a host without balance hands the task to the next one', async () => {
+    const good = fakeChannel({
+        data: { status: 'completed', result: { images: [{ url: [dataUri(PNG)], sizes: ['10x10'], layers: [{ z_index: 0 }] }] } },
+    });
+    const broke = {
+        label: 'no-money',
+        call: async () => {
+            throw Object.assign(new Error('Insufficient balance to run this request.'), { status: 402 });
+        },
+    };
+    const decomposition = await decomposeLayers({ channels: [broke, good], source: { bytes: PNG } });
+    assert.equal(decomposition.host, 'fake-host');
+    assert.equal(decomposition.layers.length, 0);
+});
+
 test('the generation answers with the bytes of the picture', async () => {
     const channel = fakeChannel({
         data: { status: 'completed', result: { images: [{ url: [dataUri(PNG)], sizes: ['10x10'] }] } },

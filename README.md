@@ -98,22 +98,47 @@ cut at the top and at the bottom becomes 1024×1024.
 
 ### Falling back when a host refuses
 
-The picture request tries every host of `imagesBackends` first. When all of them refuse the
-model — no balance, no route — the request goes to the next model of `fallback.models`:
+Every request walks the hosts of its route — `backends` for a text answer, `imagesBackends` for
+a picture — and every host that refuses gives the request to the next one. A host that refuses
+because it has **no money** (`402`, `Insufficient balance`, `insufficient_quota`) is remembered
+for the rest of the run and is not asked again: the next host takes the request and the run says
+so:
+
+```
+  ⚠ the host https://api.proxyapi.ru/v1 has no balance: Insufficient balance to run this request. — the next host takes the request
+```
+
+When every host refuses the model — no balance, no route — the request goes to the next model of
+`fallback.models`:
 
 ```json
 {
   "fallback": {
     "enabled": true,
     "models": {
-      "openai/gpt-image-2.6-sunburst": ["openai/gpt-image-2.6-flare"]
+      "openai/gpt-image-2.6-sunburst": ["openai/gpt-image-2.6-flare"],
+      "moonshotai/kimi-k3.1-pro": ["vendor/other-model"]
     }
   }
 }
 ```
 
 The key is the model that failed, the value is the list of models that get the request next. The
-run reports every step of the chain: `the model … failed — trying …`.
+list works for the text route as well as for the picture route, so a run survives the loss of the
+host that served the role. The run reports every step of the chain: `the model … failed — trying
+…`.
+
+The hosts themselves are listed in the config, and every one of them may name the environment
+variable with its key:
+
+```json
+{
+  "imagesBackends": [
+    { "baseURL": "https://api.proxyapi.ru/v1", "env": "PROXYAPI_API_KEY" },
+    { "baseURL": "https://routerai.ru/api/v1", "env": "ROUTERAI_API_KEY" }
+  ]
+}
+```
 
 ### Cutting a collage into screens
 

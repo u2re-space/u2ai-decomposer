@@ -160,7 +160,10 @@ export function createPlainRenderer({ verbose = false } = {}) {
                 console.warn(`  retry ${e.attempt}: ${e.error}`);
                 break;
             case 'request.error':
-                console.warn(`  the host failed: ${e.error}`);
+                console.warn(`  the host ${e.backend ?? ''} failed: ${e.error}`);
+                break;
+            case 'host.broke':
+                console.warn(`  the host ${e.backend} has no balance: ${e.error} — the next host takes the request`);
                 break;
             case 'model.fallback':
                 console.warn(`  the model ${e.from} failed: ${e.error} — trying ${e.to}`);
@@ -422,7 +425,10 @@ export function createRenderer({ verbose = false } = {}) {
                 say(paint(`  ↻ the host did not answer, retry ${e.attempt}: ${e.error}`, COLORS.yellow));
                 break;
             case 'request.error':
-                say(paint(`  ⚠ the host failed: ${e.error}`, COLORS.yellow));
+                say(paint(`  ⚠ the host ${e.backend ?? ''} failed: ${e.error}`, COLORS.yellow));
+                break;
+            case 'host.broke':
+                say(paint(`  ⚠ the host ${e.backend} has no balance: ${e.error} — the next host takes the request`, COLORS.yellow));
                 break;
             case 'model.fallback':
                 say(paint(`  ⚠ the model ${e.from} failed: ${e.error} — trying ${e.to}`, COLORS.yellow));

@@ -12,6 +12,7 @@ import http from 'node:http';
 import { buildResponsesBody, parseResponse, extractToolCalls, imagePart } from '../src/openai/responses.js';
 import { encodeMultipart, imageSizeFields, resolveImageFormat, sniffImage, parseImageSize, paddedSizeToMinPixels } from '../src/openai/images.js';
 import { createClient, resolveBackends, retryDelayMs } from '../src/openai/client.js';
+import { outOfCredit } from '../src/openai/errors.js';
 import { fallbackChain, fallbackModels, withModelFallback } from '../src/openai/fallback.js';
 import { getModelProfile, snapEffort, contextBytes } from '../src/model/profiles.js';
 import { toChatBody, fromChatCompletion, responsesRouteUnsupported } from '../src/openai/chat.js';
@@ -332,6 +333,45 @@ test('the client rotates to the next backend when one fails', async () => {
     }
 });
 
+test('the text request goes to the next host and the next model when the first one refuses it', async () => {
+    const broke = await startServer((req, res) => {
+        res.writeHead(402).end(JSON.stringify({ detail: 'Insufficient balance to run this request.' }));
+    });
+    const healthy = await startServer((req, res, body) => {
+        if (req.url === '/v1/responses' && JSON.parse(body).model === 'vendor/other-model') {
+            sendJson(res, {
+                id: 'resp_3', status: 'completed', model: 'vendor/other-model',
+                output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }],
+            });
+            return;
+        }
+        res.writeHead(404).end(JSON.stringify({ detail: 'The model is not available here.' }));
+    });
+    try {
+        const client = await createClient({
+            config: {
+                baseURL: broke.url,
+                apiKey: 'test',
+                retries: 0,
+                limits: { requestRetries: 0 },
+                backends: [{ baseURL: broke.url, apiKey: 'test' }, { baseURL: healthy.url, apiKey: 'test' }],
+                fallback: {
+                    enabled: true,
+                    models: { 'moonshotai/kimi-k3.1-pro': ['vendor/other-model'] },
+                },
+            },
+            env: {},
+        });
+        const answer = await client.responses.create({ model: 'moonshotai/kimi-k3.1-pro', input: 'hello' });
+        assert.equal(parseResponse(answer).text, 'ok');
+        assert.equal(broke.calls.length, 1, 'the host without balance was asked once');
+        client.close();
+    } finally {
+        await broke.close();
+        await healthy.close();
+    }
+});
+
 test('the client edits an image and returns PNG bytes', async () => {
     const server = await startServer((req, res) => {
         if (req.url === '/v1/images/edits') {
@@ -369,8 +409,8 @@ test('the picture request goes to the next model when the first one refuses it',
         if (req.url === '/v1/images/generations') {
             const model = JSON.parse(body).model;
             if (model === 'openai/gpt-image-2.6-sunburst') {
-                // The host has no balance for this model.
-                res.writeHead(402).end(JSON.stringify({ detail: 'Insufficient balance to run this request.' }));
+                // The host does not serve this model — it is not the money of the account.
+                res.writeHead(404).end(JSON.stringify({ detail: 'The model is not available here.' }));
                 return;
             }
             sendJson(res, { data: [{ b64_json: PNG_1PX.toString('base64') }] });
@@ -407,6 +447,109 @@ test('the picture request goes to the next model when the first one refuses it',
     } finally {
         await server.close();
     }
+});
+
+test('the picture request goes to the next host when the first one has no balance', async () => {
+    const broke = await startServer((req, res) => {
+        res.writeHead(402, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ detail: 'Insufficient balance to run this request.' }));
+    });
+    const healthy = await startServer((req, res) => {
+        sendJson(res, { data: [{ b64_json: PNG_1PX.toString('base64') }] });
+    });
+    try {
+        const client = await createClient({
+            config: {
+                baseURL: broke.url,
+                apiKey: 'test',
+                imagesBackends: [{ baseURL: broke.url, apiKey: 'test' }, { baseURL: healthy.url, apiKey: 'test' }],
+            },
+            env: {},
+        });
+        const answer = await client.images.generate({
+            model: 'openai/gpt-image-2.6-sunburst',
+            prompt: 'a cat in space',
+            size: '1024x1024',
+            format: 'png',
+        });
+        assert.equal(answer.images.length, 1);
+        assert.equal(broke.calls.length, 1, 'the host without balance was asked once');
+        assert.equal(healthy.calls.length, 1, 'the next host took the request');
+        client.close();
+    } finally {
+        await broke.close();
+        await healthy.close();
+    }
+});
+
+test('a host without balance is not asked again in the same run', async () => {
+    const broke = await startServer((req, res) => {
+        res.writeHead(402, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ detail: 'Insufficient balance to run this request.' }));
+    });
+    const healthy = await startServer((req, res) => {
+        sendJson(res, { data: [{ b64_json: PNG_1PX.toString('base64') }] });
+    });
+    try {
+        const events = [];
+        const client = await createClient({
+            config: {
+                baseURL: broke.url,
+                apiKey: 'test',
+                imagesBackends: [{ baseURL: broke.url, apiKey: 'test' }, { baseURL: healthy.url, apiKey: 'test' }],
+            },
+            env: {},
+            onEvent: (event) => events.push(event),
+        });
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const answer = await client.images.generate({
+                model: 'openai/gpt-image-2.6-sunburst',
+                prompt: 'a cat in space',
+                size: '1024x1024',
+                format: 'png',
+            });
+            assert.equal(answer.images.length, 1);
+        }
+        assert.equal(broke.calls.length, 1, 'the host without balance was asked once, not twice');
+        assert.equal(healthy.calls.length, 2);
+        const brokeEvents = events.filter((event) => event.type === 'host.broke');
+        assert.equal(brokeEvents.length, 1);
+        assert.equal(brokeEvents[0].backend, broke.url);
+        client.close();
+    } finally {
+        await broke.close();
+        await healthy.close();
+    }
+});
+
+test('the reason of a refusal is read from the detail of the answer', async () => {
+    const server = await startServer((req, res) => {
+        res.writeHead(402, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ detail: 'Insufficient balance to run this request.' }));
+    });
+    try {
+        const client = await createClient({
+            config: { baseURL: server.url, apiKey: 'test', imagesBackends: [{ baseURL: server.url, apiKey: 'test' }] },
+            env: {},
+        });
+        await assert.rejects(() => client.images.generate({
+            model: 'openai/gpt-image-2.6-sunburst',
+            prompt: 'a cat in space',
+            size: '1024x1024',
+            format: 'png',
+        }), /Insufficient balance to run this request\./);
+        client.close();
+    } finally {
+        await server.close();
+    }
+});
+
+test('outOfCredit tells a refusal of money from any other refusal', () => {
+    assert.equal(outOfCredit({ status: 402 }), true);
+    assert.equal(outOfCredit({ message: 'Insufficient balance to run this request.' }), true);
+    assert.equal(outOfCredit({ message: 'insufficient_quota' }), true);
+    assert.equal(outOfCredit({ status: 500, message: 'the gateway is down' }), false);
+    assert.equal(outOfCredit({ status: 404, message: 'model not found' }), false);
 });
 
 test('the client generates an image and returns PNG bytes', async () => {

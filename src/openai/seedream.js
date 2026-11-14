@@ -36,7 +36,7 @@
  */
 
 import { setTimeout as sleep } from 'node:timers/promises';
-import { ApiError } from './errors.js';
+import { ApiError, outOfCredit } from './errors.js';
 import { sniffImage } from './images.js';
 
 /** Default model id of the seedream-5.5 route. */
@@ -418,6 +418,7 @@ export async function downloadImageBytes(url, signal) {
 /**
  * Did the host refuse the model rather than the request?
  * A host that does not serve seedream is not a broken host: the next one in the chain is tried.
+ * A host that ran out of money serves nothing either: it is skipped as well.
  * @param {unknown} error
  * @returns {boolean}
  * @exports
@@ -426,6 +427,7 @@ export async function downloadImageBytes(url, signal) {
 export function isHostUnavailable(error) {
     if (!error) return false;
     if (error?.code === 'ABORTED' || error?.name === 'AbortError') return false;
+    if (outOfCredit(error)) return true;
     const status = error?.status;
     if (status === 404 || status === 502 || status === 503 || status === 504) return true;
     const text = String(error?.message ?? '').toLowerCase();

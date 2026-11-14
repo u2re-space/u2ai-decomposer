@@ -58,6 +58,7 @@ Config:
   Supports {{env:NAME}} substitutions.
   The picture hosts of imagesBackends are tried one by one; when all of them
   refuse the model, the next model of fallback.models gets the request.
+  A host that refuses for the lack of money is remembered and skipped.
 
 Examples:
   ai-decompose -i screenshot.png

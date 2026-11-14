@@ -13,7 +13,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { ApiError } from './errors.js';
+import { ApiError, outOfCredit } from './errors.js';
 import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer } from './stream.js';
@@ -219,6 +219,8 @@ export async function createClient({ config, env = process.env, signal = null, o
         ? config.limits.requestRetries
         : (Number.isSafeInteger(config?.retries) ? config.retries : defaults.retries);
     const announce = (event) => { try { onEvent?.(event); } catch { /* an observer never breaks a request */ } };
+    /** The hosts that refused for the lack of money: they are not asked again in this run. */
+    const brokeHosts = new Set();
 
     /**
      * Build an ApiError out of a failed response.
@@ -235,7 +237,10 @@ export async function createClient({ config, env = process.env, signal = null, o
         const err = isRecord(parsed) ? (parsed.error ?? parsed) : null;
         const details = isRecord(err) ? err : {};
         const fromBody = typeof err === 'string' ? err : textOf(details.message);
-        const message = (fromBody || text).slice(0, 2000) || `HTTP ${res.status}`;
+        // Some gateways answer with a `detail` instead of a `message`: the reason has to be read.
+        const detail = textOf(details.detail);
+        const reason = fromBody || detail;
+        const message = (reason || text).slice(0, 2000) || `HTTP ${res.status}`;
         return new ApiError(message, {
             code: 'API_ERROR',
             status: res.status,
@@ -396,6 +401,11 @@ export async function createClient({ config, env = process.env, signal = null, o
                 announce({ type: 'request.skip', backend: backend.baseURL, reason: `no ${supports} route` });
                 continue;
             }
+            // A host that ran out of money is not asked again: the next host takes the request.
+            if (brokeHosts.has(backend.baseURL)) {
+                announce({ type: 'request.skip', backend: backend.baseURL, reason: 'no balance' });
+                continue;
+            }
             try {
                 const answer = await callBackend(backend, path, {
                     method, body, rawBody, contentType, signal: callSignal, stream, onEvent: callEvent, model,
@@ -409,6 +419,11 @@ export async function createClient({ config, env = process.env, signal = null, o
                 if (error?.name === 'AbortError' || error?.code === 'ABORTED') throw error;
                 // A host without the route is not a host to retry: the caller picks another transport.
                 if (supports === 'responses' && responsesRouteUnsupported(error)) break;
+                // A host without money is remembered: asking it again only wastes time.
+                if (outOfCredit(error)) {
+                    brokeHosts.add(backend.baseURL);
+                    announce({ type: 'host.broke', backend: backend.baseURL, error: error.message });
+                }
                 // Otherwise the next backend gets the request.
             }
         }
@@ -421,6 +436,47 @@ export async function createClient({ config, env = process.env, signal = null, o
      * @returns {Promise<object>} the answer in the Responses shape
      */
     async function responsesCreate({
+        model = null, instructions = null, input = null, parts = null, tools = null,
+        schema = null, schemaName = 'response', strict = true, effort = null, summary = null,
+        mode = null, maxOutputTokens = null, temperature = null, store = false, truncation = null,
+        verbosity = null, stream = false, signal: callSignal = null, onEvent: callEvent = null,
+        previousResponseId = null, toolChoice = null, parallelToolCalls = null,
+    } = {}) {
+        // The hosts are tried one after another inside `call`. When every one of them refuses
+        // the model — no balance, no route — the next model of the fallback chain takes it.
+        const wantedModel = model ?? config?.model ?? null;
+        const chain = fallbackChain(config, wantedModel);
+        const candidates = chain.length ? chain : [model];
+        let lastError = null;
+        for (const [index, candidate] of candidates.entries()) {
+            try {
+                return await responsesCreateWith({
+                    model: candidate,
+                    instructions, input, parts, tools, schema, schemaName, strict, effort, summary, mode,
+                    maxOutputTokens, temperature, store, truncation, verbosity, stream,
+                    signal: callSignal, onEvent: callEvent, previousResponseId, toolChoice, parallelToolCalls,
+                });
+            } catch (error) {
+                lastError = error;
+                const next = candidates[index + 1];
+                if (!next) throw error;
+                announce({
+                    type: 'model.fallback',
+                    from: candidate,
+                    to: next,
+                    error: error?.message ?? String(error),
+                });
+            }
+        }
+        throw lastError ?? new ApiError('No model answered the request.', { code: 'NO_MODEL' });
+    }
+
+    /**
+     * One request of the Responses API for one model: the route, and the transport under it.
+     * @param {object} params
+     * @returns {Promise<object>} the answer in the Responses shape
+     */
+    async function responsesCreateWith({
         model = null, instructions = null, input = null, parts = null, tools = null,
         schema = null, schemaName = 'response', strict = true, effort = null, summary = null,
         mode = null, maxOutputTokens = null, temperature = null, store = false, truncation = null,
