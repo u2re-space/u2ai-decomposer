@@ -92,6 +92,11 @@ function validateStage(id, section, fail) {
     if (!(Number.isFinite(section.padFraction) && section.padFraction >= 0 && section.padFraction <= 1)) fail(`${where}.padFraction: число 0..1`);
     if (!(Number.isSafeInteger(section.maxAttempts) && section.maxAttempts >= 0)) fail(`${where}.maxAttempts: целое ≥ 0`);
   }
+  if (id === 'extend' || id === 'reconstruct' || id === 'overlap') {
+    if ('quality' in section && section.quality != null && !ENUMS.imageQualities.includes(section.quality)) {
+      fail(`${where}.quality: ${ENUMS.imageQualities.join(' | ')}`);
+    }
+  }
   if (id === 'decompose') {
     if (!ENUMS.decomposerModes.includes(section.mode)) fail(`${where}.mode: ${ENUMS.decomposerModes.join(' | ')}`);
     for (const key of ['maxTurns', 'maxSubReferences', 'maxRects', 'maxInlinePixels', 'minScreenSide']) {

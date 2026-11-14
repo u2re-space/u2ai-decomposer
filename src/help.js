@@ -45,6 +45,13 @@ Pipeline stages:
 Every stage reports what it decided and what it produced; the run ends with a summary
 of the output path, the screens and the number of layers.
 
+Cost:
+  A repaired fragment is a call to a picture model, and that is the most expensive
+  part of the run. The fragments are asked for the cheap quality of their stage
+  (stages.extend.quality, stages.reconstruct.quality, stages.overlap.quality —
+  low by default), and every repaired fragment is checked before the next one:
+  a repair the check refuses ends the screen there.
+
 Config:
   Stored in ~/.ai-decompose/config.json.
   Environment variables prefixed with AI_DECOMPOSE_.

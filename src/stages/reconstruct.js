@@ -36,7 +36,7 @@
 
 import path from 'node:path';
 import { copyFile, mkdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
-import { RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA } from '../agent/schemas.js';
+import { RESTORE_SCHEMA } from '../agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 import { resolveInside, toPosix } from '../agent/paths.js';
 import { rasterCrop, rasterInfo, rasterPatch } from '../image/raster.js';
@@ -45,6 +45,7 @@ import { defaults } from '../config/defaults.js';
 import { imageModelFor, sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
 import { FRAGMENT_MARGIN, editorPrompt, pickPatches, planFragment } from './restore-plan.js';
+import { editFragment, verifyRepair } from './repair.js';
 
 /** Directory under the work directory where the repaired copies are written. */
 export const RESTORED_DIR = 'restored';
@@ -121,35 +122,6 @@ async function askRestorer({ roles, file, frame, original, model, effort }) {
         model,
         effort,
     });
-}
-
-/**
- * Ask whether the repaired file is better than the one it would replace.
- *
- * Anything but a clean "better" keeps the original: a repair that redrew the lettering is worse
- * for measurement than the defect it removed, and the measurer cannot tell the two apart.
- * @param {{ roles: object, before: string, after: string, root: string, model: string|null,
- *   effort: string|null }} params
- * @returns {Promise<{ verdict: string, reason: string }>}
- * @ai.hint io
- */
-async function verifyRepair({ roles, before, after, root, model, effort }) {
-    const [first, second] = await Promise.all([readFile(before), readFile(after)]);
-    const resolved = roles.resolve?.('restorerVerify');
-    const result = await roles.run('restorerVerify', {
-        text: 'BEFORE is the first image, AFTER is the second. Which should the measurer use?',
-        parts: [imagePart(first, sniffImage(first).mime), imagePart(second, sniffImage(second).mime)],
-        instructions: resolved?.instructions ?? ROLE_INSTRUCTIONS.restorerVerify,
-        schema: RESTORE_VERIFY_SCHEMA,
-        schemaName: 'restoreVerdict',
-        maxTurns: 1,
-        model,
-        effort,
-    });
-    if (!result?.data?.verdict) {
-        return { verdict: 'worse', reason: `the verification did not answer (${result?.status ?? 'unknown'})` };
-    }
-    return { verdict: result.data.verdict, reason: String(result.data.reason ?? '').trim() };
 }
 
 /**
@@ -286,9 +258,13 @@ export async function runReconstruct(state, notify = () => {}) {
         await mkdir(scratch, { recursive: true }).catch(() => {});
         try {
             // Each patch is applied to the result of the previous one, so the last merge is the file
-            // that replaces the screen.
+            // that replaces the screen. Every patch is checked on its own: a repair the check
+            // refuses ends the screen there, so the editor is not asked again for a screen that is
+            // already beyond repair.
             let currentAbs = file.abs;
+            let lastGoodAbs = file.abs;
             let applied = [];
+            let verification = null;
             for (const [index, patch] of accepted.patches.entries()) {
                 const box = planFragment(patch, {
                     frameWidth: frame.width,
@@ -317,6 +293,7 @@ export async function runReconstruct(state, notify = () => {}) {
                         filename: path.basename(fragmentAbs),
                         bytes: fragment,
                         maxAttempts,
+                        quality: settings.quality ?? null,
                     });
                     if (!edited) {
                         warnings.push(`reconstruct: ${file.rel}: region ${index + 1} was not repaired`);
@@ -334,6 +311,20 @@ export async function runReconstruct(state, notify = () => {}) {
                         cwd: root,
                         engine,
                     });
+                    const check = await verifyRepair({
+                        roles,
+                        before: file.abs,
+                        after: mergedAbs,
+                        root,
+                        model,
+                        effort,
+                    }).catch((error) => ({ verdict: 'worse', reason: error?.message ?? String(error) }));
+                    if (check.verdict !== 'better') {
+                        warnings.push(`reconstruct: ${file.rel}: the repair was refused by the verification `
+                            + `(${check.verdict}: ${check.reason}) — the screen is left as it was`);
+                        verification = check;
+                        break;
+                    }
                     applied.push({
                         kind: patch.kind,
                         box: merged.box,
@@ -342,7 +333,9 @@ export async function runReconstruct(state, notify = () => {}) {
                         resized: merged.resized,
                         grown: box.grown,
                     });
+                    verification = check;
                     currentAbs = mergedAbs;
+                    lastGoodAbs = mergedAbs;
                 } catch (error) {
                     warnings.push(`reconstruct: ${file.rel}: region ${index + 1} was not repaired (${error?.message ?? error})`);
                 } finally {
@@ -354,25 +347,7 @@ export async function runReconstruct(state, notify = () => {}) {
 
             // The pixels are checked before the geometry is applied: a rotation moves every element
             // of the screen, and the verifier would call that a change it has to refuse.
-            let baseAbs = file.abs;
-            let verification = null;
-            if (applied.length) {
-                baseAbs = currentAbs;
-                verification = await verifyRepair({
-                    roles,
-                    before: file.abs,
-                    after: baseAbs,
-                    root,
-                    model,
-                    effort,
-                }).catch((error) => ({ verdict: 'worse', reason: error?.message ?? String(error) }));
-                if (verification.verdict !== 'better') {
-                    warnings.push(`reconstruct: ${file.rel}: the repair was refused by the verification `
-                        + `(${verification.verdict}: ${verification.reason}) — the original screen stays`);
-                    applied = [];
-                    baseAbs = file.abs;
-                }
-            }
+            let baseAbs = lastGoodAbs;
 
             // The geometry is applied to the pixels that survived, and it is judged by the
             // measurement: the correction is kept when the screen became flatter, and rolled back
@@ -499,31 +474,6 @@ export async function runReconstruct(state, notify = () => {}) {
     if (byFrom.size && state.images?.length) {
         state.images = state.images.map((rel) => byFrom.get(toPosix(rel))?.to ?? rel);
     }
-}
-
-/**
- * Send one fragment to the image editor and wait for an answer.
- * @param {{ client: object, editorModel: string, prompt: string, filename: string, bytes: Buffer,
- *   maxAttempts: number }} params
- * @returns {Promise<Buffer|null>} the edited bytes, or null when the editor did not answer
- * @ai.hint io
- */
-async function editFragment({ client, editorModel, prompt, filename, bytes, maxAttempts }) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            const answer = await client.images.edit({
-                model: editorModel,
-                prompt,
-                format: 'png',
-                image: { filename, mime: sniffImage(bytes).mime, bytes },
-            });
-            if (!answer?.images?.length) throw new Error('the editor returned an empty answer');
-            return answer.images[0].bytes;
-        } catch (error) {
-            if (attempt >= maxAttempts) return null;
-        }
-    }
-    return null;
 }
 
 /**

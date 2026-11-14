@@ -349,6 +349,7 @@ export async function runExtension(state, notify = () => {}) {
     const settings = config.stages?.extend ?? {};
     const padFraction = Number(settings.padFraction ?? 0.125);
     const maxAttempts = Number.isSafeInteger(settings.maxAttempts) ? settings.maxAttempts : 2;
+    const quality = settings.quality ?? null;
     const seamLimit = Number(config.image?.seamDeltaMin ?? 0.25);
     const seamFraction = Number(config.image?.seamBandFraction ?? 0.06);
     const engine = config.raster?.engine ?? 'auto';
@@ -459,7 +460,7 @@ export async function runExtension(state, notify = () => {}) {
                     prompt: extenderPrompt(hint ? `${prompt}\n\n${hint}` : prompt),
                     size: `${padded.width}x${padded.height}`,
                     format: config.image?.format ?? 'png',
-                    quality: config.image?.quality ?? null,
+                    quality: quality ?? config.image?.quality ?? null,
                     background: config.image?.background ?? 'auto',
                     image: {
                         filename: path.basename(img),

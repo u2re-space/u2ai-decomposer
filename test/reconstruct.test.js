@@ -124,6 +124,24 @@ const repairPlan = {
     }],
 };
 
+/** The same screen with two damaged regions: the repair of the first may end the screen. */
+const twoPatchPlan = {
+    verdict: 'repair',
+    assessment: 'two regions of the neighbouring screen came along with the crop',
+    patches: [
+        repairPlan.patches[0],
+        {
+            kind: 'rounded-corner',
+            x: 200,
+            y: 150,
+            width: 40,
+            height: 40,
+            finding: 'the corner of the display is cut round',
+            prompt: 'continue the background of the screen into the rounded corner of the display',
+        },
+    ],
+};
+
 // ---------------------------------------------------------------------------
 // The plan
 // ---------------------------------------------------------------------------
@@ -260,6 +278,50 @@ test('a repair the verification refuses is deleted and the original stays', asyn
     }
 });
 
+test('a refused repair ends the screen: the editor is not asked again', async () => {
+    const root = await workDirWith();
+    try {
+        const edits = [];
+        const client = mockClient(async (params) => {
+            edits.push(params);
+            return { images: [{ bytes: params.image.bytes, mime: 'image/png' }] };
+        });
+        const roles = mockRoles((name) => (name === 'restorerVerify'
+            ? { verdict: 'worse', reason: 'the lettering was redrawn' }
+            : twoPatchPlan));
+        const state = stateFor(root, roles, { client });
+        await runReconstruct(state, () => {});
+
+        assert.equal(edits.length, 1, 'the second region was not sent to the editor');
+        assert.match(state.warnings.join('\n'), /refused by the verification/);
+        assert.equal(state.restored.find((item) => item.to), undefined);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the editor is asked for the cheap quality the stage asks for', async () => {
+    const root = await workDirWith();
+    try {
+        const edits = [];
+        const client = mockClient(async (params) => {
+            edits.push(params);
+            return { images: [{ bytes: params.image.bytes, mime: 'image/png' }] };
+        });
+        const roles = mockRoles((name) => (name === 'restorerVerify'
+            ? { verdict: 'better', reason: 'the defect is gone' }
+            : repairPlan));
+        const state = stateFor(root, roles, { client });
+        state.config.stages.reconstruct.quality = 'low';
+        await runReconstruct(state, () => {});
+
+        assert.equal(edits.length, 1);
+        assert.equal(edits[0].quality, 'low');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test('an editor that fails leaves the screen alone', async () => {
     const root = await workDirWith();
     try {
@@ -301,8 +363,7 @@ test('the reconstruct section of the config accepts the patch limits', () => {
     assert.throws(() => validateConfig(config), /maxPatches/);
 });
 
-test('the reconstruct section of the config accepts the geometry limits', () => {
-    const config = structuredClone(defaults);
+test('the reconstruct section of the config accepts the geometry limits', () => {    const config = structuredClone(defaults);
     config.stages.reconstruct.geometry.maxRotateDeg = 10;
     config.stages.reconstruct.geometry.enabled = false;
     assert.doesNotThrow(() => validateConfig(config));

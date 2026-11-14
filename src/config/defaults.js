@@ -145,6 +145,12 @@ export const defaults = {
       padFraction: 0.125,
       /** Max verify-and-stitch attempts on the extended band. */
       maxAttempts: 2,
+      /**
+       * The quality of the picture the editor is asked for. The band is a background
+       * that is stitched at the edge of the source, so the cheapest quality is enough
+       * — and a `high` band costs many times more than the whole rest of the run.
+       */
+      quality: 'low',
     },
     decompose: {
       enabled: true,
@@ -182,6 +188,12 @@ export const defaults = {
       boxPadding: 16,
       /** Max regions of one screen that may be repaired in one pass. */
       maxPatches: 3,
+      /**
+       * The quality of the answer the editor gives for one fragment. A fragment is a
+       * strip of background that is stitched back into one box, so the cheapest quality
+       * is enough: a `high` answer costs many times more and buys nothing there.
+       */
+      quality: 'low',
       /** The geometry the role names and the harness applies to the pixels. */
       geometry: {
         /** Apply the rotation and the size correction the role asks for. */
@@ -202,6 +214,8 @@ export const defaults = {
       boxPadding: 16,
       /** Max regions of one screen that may be cleaned in one pass. */
       maxPatches: 3,
+      /** The quality of the answer the editor gives for one fragment. */
+      quality: 'low',
     },
     resolve: {
       enabled: true,

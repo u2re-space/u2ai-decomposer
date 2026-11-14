@@ -86,6 +86,11 @@ const mockRoles = (answers, calls = []) => ({
 
 const mockClient = (edit) => ({ images: { edit, generate: async () => ({ images: [] }) } });
 
+/** The roles of the stage: the plan of the overlap and the check of the repair. */
+const rolesOf = (plan) => mockRoles((name) => (name === 'restorerVerify'
+    ? { verdict: 'better', reason: 'the foreign strip is gone' }
+    : plan));
+
 /** A work dir with the two screens the decompose stage produced. */
 const workDirWith = async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-overlap-'));
@@ -190,7 +195,7 @@ test('a foreign region is cut, cleaned and stitched back into its box', async ()
             edits.push(params);
             return { images: [{ bytes: params.image.bytes, mime: 'image/png' }] };
         });
-        const state = stateFor(root, mockRoles(overlapPlan), { client });
+        const state = stateFor(root, rolesOf(overlapPlan), { client });
         const events = [];
         await runOverlap(state, (event) => events.push(event));
 
@@ -276,4 +281,52 @@ test('the overlap section of the config accepts the patch limits', () => {
     assert.doesNotThrow(() => validateConfig(config));
     config.stages.overlap.maxPatches = 1.5;
     assert.throws(() => validateConfig(config), /maxPatches/);
+});
+
+test('a refused cleaning ends the screen: the editor is not asked again', async () => {
+    const root = await workDirWith();
+    try {
+        const edits = [];
+        const client = mockClient(async (params) => {
+            edits.push(params);
+            return { images: [{ bytes: params.image.bytes, mime: 'image/png' }] };
+        });
+        const plan = {
+            ...overlapPlan,
+            patches: [
+                overlapPlan.patches[0],
+                { ...overlapPlan.patches[0], x: 200, y: 150, width: 40, height: 40 },
+            ],
+        };
+        const roles = mockRoles((name) => (name === 'restorerVerify'
+            ? { verdict: 'worse', reason: 'the lettering was redrawn' }
+            : plan));
+        const state = stateFor(root, roles, { client });
+        await runOverlap(state, () => {});
+
+        assert.equal(edits.length, 1, 'the second region was not sent to the editor');
+        assert.match(state.warnings.join('\n'), /refused by the verification/);
+        assert.ok(state.overlapResolved.every((item) => item.kept === true));
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the editor is asked for the cheap quality the stage asks for', async () => {
+    const root = await workDirWith();
+    try {
+        const edits = [];
+        const client = mockClient(async (params) => {
+            edits.push(params);
+            return { images: [{ bytes: params.image.bytes, mime: 'image/png' }] };
+        });
+        const state = stateFor(root, rolesOf(overlapPlan), { client });
+        state.config.stages.overlap.quality = 'low';
+        await runOverlap(state, () => {});
+
+        assert.equal(edits.length, 1);
+        assert.equal(edits[0].quality, 'low');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
 });

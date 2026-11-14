@@ -31,6 +31,7 @@ import { rasterCrop, rasterInfo, rasterPatch } from '../image/raster.js';
 import { imageModelFor, sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
 import { editorPrompt, pickPatches, planFragment } from './restore-plan.js';
+import { editFragment, verifyRepair } from './repair.js';
 
 /** Directory under the work directory where the cleaned copies are written. */
 export const OVERLAP_DIR = 'overlap';
@@ -108,6 +109,7 @@ export async function runOverlap(state, notify = () => {}) {
     const maxAttempts = Number.isSafeInteger(settings.maxAttempts) ? Math.max(1, settings.maxAttempts) : 2;
     const boxPadding = Number.isSafeInteger(settings.boxPadding) ? Math.max(0, settings.boxPadding) : 16;
     const maxPatches = Number.isSafeInteger(settings.maxPatches) ? Math.max(1, settings.maxPatches) : 3;
+    const quality = settings.quality ?? null;
 
     const outDir = path.join(root, workDir, OVERLAP_DIR);
     await mkdir(outDir, { recursive: true });
@@ -198,6 +200,7 @@ export async function runOverlap(state, notify = () => {}) {
             continue;
         }
         let currentAbs = group.file.abs;
+        let lastGoodAbs = group.file.abs;
         const applied = [];
         await mkdir(scratch, { recursive: true }).catch(() => {});
         for (const [index, patch] of patches.entries()) {
@@ -228,6 +231,7 @@ export async function runOverlap(state, notify = () => {}) {
                     filename: path.basename(fragmentAbs),
                     bytes: fragment,
                     maxAttempts,
+                    quality,
                 });
                 if (!edited) {
                     warnings.push(`overlap: ${rel}: region ${index + 1} was not cleaned`);
@@ -245,6 +249,21 @@ export async function runOverlap(state, notify = () => {}) {
                     cwd: root,
                     engine,
                 });
+                // Every region is checked on its own: a cleaning the check refuses ends the screen
+                // there, so the editor is not asked again for a screen that is already beyond repair.
+                const check = await verifyRepair({
+                    roles,
+                    before: group.file.abs,
+                    after: mergedAbs,
+                    root,
+                    model,
+                    effort,
+                }).catch((error) => ({ verdict: 'worse', reason: error?.message ?? String(error) }));
+                if (check.verdict !== 'better') {
+                    warnings.push(`overlap: ${rel}: the cleaning was refused by the verification `
+                        + `(${check.verdict}: ${check.reason}) — the screen is left as it was`);
+                    break;
+                }
                 applied.push({
                     kind: patch.kind,
                     box: merged.box,
@@ -254,6 +273,7 @@ export async function runOverlap(state, notify = () => {}) {
                     grown: box.grown,
                 });
                 currentAbs = mergedAbs;
+                lastGoodAbs = mergedAbs;
             } catch (error) {
                 warnings.push(`overlap: ${rel}: region ${index + 1} was not cleaned (${error?.message ?? error})`);
             } finally {
@@ -273,7 +293,7 @@ export async function runOverlap(state, notify = () => {}) {
         const target = path.join(root, ...to.split('/'));
         try {
             await mkdir(path.dirname(target), { recursive: true });
-            await copyFile(currentAbs, target);
+            await copyFile(lastGoodAbs, target);
         } catch (error) {
             warnings.push(`overlap: ${rel}: the cleaned file was not saved (${error?.message ?? error})`);
             resolvedFiles.push({ from: rel, to: rel, kept: true });
@@ -327,31 +347,6 @@ export async function runOverlap(state, notify = () => {}) {
     }
 
     notify({ type: 'overlap.done', count: resolvedFiles.filter((item) => !item.kept).length });
-}
-
-/**
- * Send one fragment to the image editor and wait for an answer.
- * @param {{ client: object, editorModel: string, prompt: string, filename: string, bytes: Buffer,
- *   maxAttempts: number }} params
- * @returns {Promise<Buffer|null>} the edited bytes, or null when the editor did not answer
- * @ai.hint io
- */
-async function editFragment({ client, editorModel, prompt, filename, bytes, maxAttempts }) {
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            const answer = await client.images.edit({
-                model: editorModel,
-                prompt,
-                format: 'png',
-                image: { filename, mime: sniffImage(bytes).mime, bytes },
-            });
-            if (!answer?.images?.length) throw new Error('the editor returned an empty answer');
-            return answer.images[0].bytes;
-        } catch (error) {
-            if (attempt >= maxAttempts) return null;
-        }
-    }
-    return null;
 }
 
 /**

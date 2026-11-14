@@ -168,6 +168,22 @@ is refused with a warning instead of being applied quietly.
   geometry: 01-home.png — tilt 3°, size 0% (2.9° → 0.4°, applied)
 ```
 
+### What a repair costs
+
+Every fragment the editor is asked to fix is a call to a picture model, and that call is the most
+expensive thing in the run. Two rules keep it down.
+
+The **quality** of the answer is a setting of the stage, not of the run: a fragment is a strip of
+background that is stitched back into one box, so the cheap quality is enough
+(`stages.reconstruct.quality`, `stages.overlap.quality`, `stages.extend.quality` — `low` by
+default). The global `image.quality` is used for the pictures the run generates, not for the
+fragments it repairs.
+
+The **check comes before the next repair**. Every repaired fragment is shown to the role again,
+side by side with the screen it replaces, and a repair the check refuses ends the screen there:
+the editor is not asked again for a screen that is already beyond repair. A screen that cannot be
+fixed costs one call, not three.
+
 ### What the run reports
 
 Every stage says what it decided and what it produced — the edges that were grown, the screens
