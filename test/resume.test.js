@@ -9,9 +9,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 
-import { resumeFromWorkDir } from '../src/shared/resume.js';
+import { resumeFromWorkDir, latestBatch } from '../src/shared/resume.js';
 import { screenNameOf } from '../src/shared/names.js';
 import { readManifest, saveStageManifest } from '../src/shared/manifest.js';
 
@@ -43,6 +43,24 @@ const stateIn = (root) => ({
     screens: [],
     screensFiles: [],
 });
+
+/**
+ * A work directory whose pictures were written at the given times.
+ * @param {string} root project root
+ * @param {string} dir the directory of the work directory
+ * @param {Array<[string, string]>} files the picture and the time it was written at
+ * @returns {Promise<void>}
+ */
+async function workDirAt(root, dir, files) {
+    const dirAbs = path.join(root, 'decomposition', dir);
+    await mkdir(dirAbs, { recursive: true });
+    for (const [name, when] of files) {
+        const abs = path.join(dirAbs, name);
+        await writeFile(abs, PNG_1PX);
+        const time = new Date(when);
+        await utimes(abs, time, time);
+    }
+}
 
 test('the name of a screen is read from the name of its file', () => {
     assert.equal(screenNameOf('decomposition/screens/01-home.png'), 'home');
@@ -185,6 +203,70 @@ test('a run without artifacts keeps the pictures it was given', async () => {
 
         assert.equal(result.resumed, false);
         assert.deepEqual(state.images, ['app.png']);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('only the files of the last run are taken from a directory', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-resume-'));
+    try {
+        await workDirAt(root, 'rectified', [
+            ['app-left.png', '2026-11-14T09:24:00Z'],
+            ['app-centre.png', '2026-11-14T09:24:30Z'],
+            ['app-right.png', '2026-11-14T09:25:00Z'],
+            ['left.png', '2026-11-14T09:51:00Z'],
+            ['center.png', '2026-11-14T09:51:20Z'],
+            ['right.png', '2026-11-14T09:51:40Z'],
+            ['left-screen.png', '2026-11-14T10:16:00Z'],
+            ['center-screen.png', '2026-11-14T10:16:20Z'],
+            ['right-screen.png', '2026-11-14T10:16:40Z'],
+        ]);
+        const state = stateIn(root);
+        const result = await resumeFromWorkDir(state, { stages: ['reconstruct'] });
+
+        assert.equal(result.files, 3);
+        assert.deepEqual(state.screensFiles.map((file) => file.rel), [
+            'decomposition/rectified/center-screen.png',
+            'decomposition/rectified/left-screen.png',
+            'decomposition/rectified/right-screen.png',
+        ]);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the newest batch of files is the last run', () => {
+    const files = [
+        { name: 'old', mtime: Date.parse('2026-11-14T09:24:00Z') },
+        { name: 'old2', mtime: Date.parse('2026-11-14T09:25:00Z') },
+        { name: 'new', mtime: Date.parse('2026-11-14T10:16:00Z') },
+        { name: 'new2', mtime: Date.parse('2026-11-14T10:16:20Z') },
+    ];
+    assert.deepEqual(latestBatch(files).map((file) => file.name), ['new', 'new2']);
+    assert.deepEqual(latestBatch([]), []);
+    assert.deepEqual(latestBatch([{ name: 'one' }]).map((file) => file.name), ['one']);
+});
+
+test('a manifest that names a file that is gone is not followed', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-resume-'));
+    try {
+        await workDirWith(root, { rectified: ['01-left.png'] });
+        await writeFile(path.join(root, 'decomposition', 'manifest.json'), JSON.stringify({
+            stages: {
+                rectify: {
+                    files: [
+                        { rel: 'decomposition/rectified/01-left.png', screen: 'left' },
+                        { rel: 'decomposition/rectified/02-gone.png', screen: 'gone' },
+                    ],
+                },
+            },
+        }));
+        const state = stateIn(root);
+        const result = await resumeFromWorkDir(state, { stages: ['reconstruct'] });
+
+        assert.equal(result.files, 1);
+        assert.equal(state.screensFiles[0].rel, 'decomposition/rectified/01-left.png');
     } finally {
         await rm(root, { recursive: true, force: true });
     }

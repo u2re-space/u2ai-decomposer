@@ -9,11 +9,12 @@
  *
  *   The artifacts are read from the manifest of the work directory: it knows the name of every
  *   screen and the file it ended up in. When the manifest says nothing, the pictures of the
- *   directories are read instead, and the name of a screen is taken from the name of its file.
+ *   directories are read instead, the name of a screen is taken from the name of its file, and
+ *   only the files of the last run are taken: a directory keeps the files of the runs before it.
  *
  * @depends node:path, node:fs/promises, agent/paths, stages/index, shared/manifest, shared/names
  * @usedBy shared/pipeline
- * @exports resumeFromWorkDir
+ * @exports resumeFromWorkDir, latestBatch
  * @ai.tags resume, stages
  * @ai.hint io
  */
@@ -26,9 +27,15 @@ import { readManifest } from './manifest.js';
 import { screenNameOf } from './names.js';
 
 /**
+ * The gap between two runs: the files of one run are written one after another, and a longer
+ * pause between two files means that the older one belongs to an earlier run.
+ */
+const RUN_GAP_MS = 10 * 60 * 1000;
+
+/**
  * The pictures of one directory of the work directory.
  * @param {string} dir the absolute path of the directory
- * @returns {Promise<Array<{ name: string, abs: string, bytes: number }>>}
+ * @returns {Promise<Array<{ name: string, abs: string, bytes: number, mtime: number }>>}
  * @ai.hint io
  */
 async function picturesIn(dir) {
@@ -44,9 +51,33 @@ async function picturesIn(dir) {
         const abs = path.join(dir, name);
         const info = await stat(abs).catch(() => null);
         if (!info?.isFile()) continue;
-        out.push({ name, abs, bytes: info.size });
+        out.push({ name, abs, bytes: info.size, mtime: info.mtimeMs });
     }
     return out;
+}
+
+/**
+ * The newest batch of files: the files of the last run.
+ *
+ * A directory of the work directory keeps the files of every run that wrote to it, so a run
+ * that starts without a manifest sees the screens of the runs before it as well. The files of
+ * one run are written one after another, and a pause between two files means that the older one
+ * belongs to an earlier run: the last run is the newest batch of files.
+ * @param {Array<{ mtime?: number }>} files the files of a directory, with their times
+ * @returns {Array<object>} the files of the last run, in the order of their names
+ * @exports
+ * @ai.hint pure
+ */
+export function latestBatch(files) {
+    if (files.length <= 1) return files;
+    const sorted = [...files].sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0));
+    const newest = sorted[0].mtime ?? 0;
+    const batch = [sorted[0]];
+    for (const file of sorted.slice(1)) {
+        if (newest - (file.mtime ?? 0) > RUN_GAP_MS) break;
+        batch.push(file);
+    }
+    return batch.sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? '')));
 }
 
 /**
@@ -115,16 +146,21 @@ export async function resumeFromWorkDir(state, { stages = [], notify = null } = 
     let stageId = null;
     let files = [];
     for (const wantedStage of wanted) {
-        const fromManifest = filesFromManifest(manifest, wantedStage)
-            .filter((file) => file?.rel)
-            .map((file) => ({ ...file, abs: path.resolve(root, file.rel) }));
+        const fromManifest = [];
+        for (const file of filesFromManifest(manifest, wantedStage)) {
+            if (!file?.rel) continue;
+            const abs = path.resolve(root, file.rel);
+            const info = await stat(abs).catch(() => null);
+            if (!info?.isFile()) continue;
+            fromManifest.push({ ...file, abs });
+        }
         if (fromManifest.length) {
             stageId = wantedStage;
             files = fromManifest;
             break;
         }
         const dir = path.join(workDir, STAGE_DIRS[wantedStage]);
-        const found = await picturesIn(dir);
+        const found = latestBatch(await picturesIn(dir));
         if (found.length) {
             stageId = wantedStage;
             files = found.map((file) => ({

@@ -80,7 +80,9 @@ down. The run takes the screens from the work directory of the last run (`decomp
 
 Every stage writes what it produced into `decomposition/manifest.json`, so the names of the
 screens and the files they ended up in survive the run. Without a manifest the pictures of the
-directories are read instead, and the name of a screen is taken from the name of its file.
+directories are read instead, and the name of a screen is taken from the name of its file. A
+directory keeps the pictures of every run that wrote to it, so only the newest batch of files is
+taken — the files of the last run, written one after another.
 
 The stage that cuts the screens is the one that cannot be skipped: without it there is nothing to
 continue from, and the stage works on the pictures of `--image` instead.
