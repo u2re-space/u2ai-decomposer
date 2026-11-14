@@ -182,6 +182,19 @@ role is told so, and the stage checks the result: after the cut, the role looks 
 and at the screens it produced and says whether a screen was cut off. A screen that lost its
 edges is cut again, with wider corners (`stages.rectify.review`, on by default).
 
+A screen gets up to `stages.rectify.maxAttempts` attempts (three by default), and every attempt is
+projected from the **original picture**, never from a frame an earlier attempt produced: a
+projection on top of a projection only adds the error of the first one. The best result of a
+screen wins — the tilt is measured in the pixels, not judged by the model — and a result that is
+worse than the one that is already kept is rolled back, so the screen keeps the bytes it had. A
+screen stops trying as soon as an attempt does not bring it any closer to level, and a screen
+that is already level is not asked again at all: there is nothing left to improve. The re-cut of
+the review is an attempt as well and takes a part of the same budget.
+
+Every accepted screen lands under a canonical name — the label of the screen and its number —
+and the candidates of a round live in a scratch directory, so a later attempt never overwrites
+the result that is already kept.
+
 The collage is cut out of the **reference**, not out of the crops the `decomposer` made of it:
 the reference is the ground truth of the picture, and a model that reads three tilted phones as
 two flat screens cuts it in the wrong place. The rectifier works on the whole picture and names

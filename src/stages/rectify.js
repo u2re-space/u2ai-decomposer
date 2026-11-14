@@ -9,6 +9,11 @@
  *   tilt that is still measurable in the pixels. A result that is not flatter than the source is
  *   deleted, and the source stays where it was.
  *
+ *   Every screen gets up to `stages.rectify.maxAttempts` attempts, and every attempt is
+ *   projected from the original picture, never from a frame an earlier attempt produced. The
+ *   best result of a screen wins, a worse one is rolled back, and a screen that did not get any
+ *   closer to level stops trying: there is nothing left to improve.
+ *
  *   The projection is also the cut. The tool maps the quad onto a rectangle of the quad's own
  *   size, so one call around one screen inside a collage returns that screen, flat, as its own
  *   file. A collage of three phones at different angles is therefore separated here.
@@ -18,17 +23,18 @@
  * @usedBy shared/pipeline
  * @exports runRectify, acceptsRectification, producedScreens, validateRectifiedFile,
  *   swapReferencePaths, quadCorners, screenFileName, projectQuad, opaqueShare, referenceFiles,
- *   cropOfReference, RECTIFIED_DIR, MAX_RESIDUAL_DEG, MIN_IMPROVEMENT_DEG, RECTIFIER_TOOLS
+ *   cropOfReference, screenKey, betterAngle, RECTIFIED_DIR, MAX_RESIDUAL_DEG, MIN_IMPROVEMENT_DEG,
+ *   RECTIFIER_TOOLS
  * @ai.tags rectification, perspective, screens
  * @ai.hint keep
  * @ai.hint legacy-0.2
  */
 
 import path from 'node:path';
-import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { RECTIFY_SCHEMA, RECTIFY_REVIEW_SCHEMA } from '../agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
-import { resolveInside, toPosix } from '../agent/paths.js';
+import { isInside, resolveInside, toPosix } from '../agent/paths.js';
 import { toolSpecs } from '../agent/tool-specs.js';
 import { rasterInfo, decodeRgba } from '../image/raster.js';
 import { perspectiveRectify } from '../image/rectify.js';
@@ -83,6 +89,41 @@ export function acceptsRectification(sourceResult, result, maxDeg = MAX_RESIDUAL
         };
     }
     return { ok: true, reason: `improved: ${sourceAngle.toFixed(1)}° → ${resultAngle.toFixed(1)}°` };
+}
+
+/**
+ * The key of a screen in the map of the screens of one picture.
+ *
+ * The label is the name the role gave the screen; a screen without a label is known by its place
+ * in the answer.
+ * @param {string} label
+ * @param {number} index
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function screenKey(label, index) {
+    const name = String(label ?? '').trim().toLowerCase();
+    return name || `#${index}`;
+}
+
+/**
+ * Is the next result of a screen better than the one that is already kept?
+ *
+ * The first result of a screen has nothing to beat, so it is kept. After that a new result has to
+ * be flatter by a real margin: a result that is a little flatter is not a repair, it is noise, and
+ * a result that cannot be measured at all is never better than one that can.
+ * @param {number|null} next the tilt of the new result
+ * @param {number|null} current the tilt of the result that is kept
+ * @param {number} [minImprovement] how much flatter the new result has to be
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function betterAngle(next, current, minImprovement = MIN_IMPROVEMENT_DEG) {
+    if (current === null || current === undefined) return true;
+    if (next === null || next === undefined) return false;
+    return Math.abs(next) < Math.abs(current) - minImprovement;
 }
 
 /**
@@ -268,22 +309,25 @@ export async function projectQuad({
 /**
  * Ask the rectifier role about one reference.
  * @param {{ root: string, roles: object, file: { rel: string, abs: string }, frame: object,
- *   outDirRel: string, extraTools: object[]|null, model: string|null, effort: string|null,
- *   maxTurns: number, note?: string }} params
+ *   scratchRel: string, extraTools: object[]|null, model: string|null,
+ *   effort: string|null, maxTurns: number, note?: string }} params
  * @returns {Promise<object>} the answer of the role runner
  * @ai.hint io
  */
-async function askRectifier({ root, roles, file, frame, outDirRel, extraTools, model, effort, maxTurns, note = '' }) {
+async function askRectifier({ root, roles, file, frame, scratchRel, extraTools, model, effort, maxTurns, note = '' }) {
     const bytes = await readFile(file.abs);
     const text = [
         `Reference: ${file.rel}`,
         `Size: ${frame.width}×${frame.height} pixels. Every coordinate you place belongs to this file.`,
-        `Write any corrected file under ${outDirRel}/ — nowhere else, and never over the reference itself.`,
+        `Write any corrected file under ${scratchRel}/ — nowhere else, and never over the reference itself.`,
         '',
         'Say whether this picture needs a projection, and if it does, place the corners of every screen it',
         'carries and project each one separately: one correct_perspective call per screen cuts that screen',
         'out and levels it in the same step, because the tool maps your quad onto a rectangle of the quad\'s',
         'own size.',
+        'Project the original picture every time — never a file a previous attempt produced: a projection on',
+        'top of a projection only adds the error of the first one. The stage projects your corners on the',
+        'original itself, so name the corners even when the tool call does not come through.',
         note ? `\n${note}` : '',
     ].filter(Boolean).join('\n');
     return await roles.run('rectifier', {
@@ -307,13 +351,13 @@ async function askRectifier({ root, roles, file, frame, outDirRel, extraTools, m
  * runs out of the frame, the margin of the display is gone. The role sees the reference and the
  * cuts side by side, so it can say which screen was cut off and place the corners again.
  * @param {{ root: string, roles: object, file: { rel: string, abs: string }, frame: object,
- *   outDirRel: string, extraTools: object[]|null, model: string|null, effort: string|null,
+ *   scratchRel: string, extraTools: object[]|null, model: string|null, effort: string|null,
  *   maxTurns: number, cuts: Array<{ to: string }> }} params
  * @returns {Promise<object>} the answer of the role runner
  * @ai.hint io
  */
 async function reviewCuts({
-    root, roles, file, frame, outDirRel, extraTools, model, effort, maxTurns, cuts,
+    root, roles, file, frame, scratchRel, extraTools, model, effort, maxTurns, cuts,
 }) {
     const bytes = await readFile(file.abs);
     const parts = [imagePart(bytes, sniffImage(bytes).mime)];
@@ -337,8 +381,10 @@ async function reviewCuts({
         'If every screen is complete, answer "ok" and name nothing.',
         'If a screen was cut off, answer "recut", name that screen with the same label as before, and',
         'place its four corners again, wider than before: on the outer edge of the display area of the',
-        'device, outside the display rather than inside the content. Project it again, or name the',
-        'corners and the stage will project them.',
+        'device, outside the display rather than inside the content. Write the new cut under '
+        + `${scratchRel}/, and project the original picture — never the cut you are shown, a projection on`,
+        'top of a projection only adds the error of the first one. Name the corners as well, and the stage',
+        'will project them.',
     ].join('\n');
     return await roles.run('rectifier', {
         text,
@@ -454,14 +500,15 @@ export async function runRectify(state, notify = () => {}) {
     const minImprovementDeg = Number.isFinite(settings.minImprovementDeg) ? settings.minImprovementDeg : MIN_IMPROVEMENT_DEG;
     const maxTurns = Number.isSafeInteger(settings.maxTurns) ? settings.maxTurns : 24;
     const maxSplitTurns = Number.isSafeInteger(settings.maxSplitTurns) ? settings.maxSplitTurns : 32;
-    const maxAttempts = Number.isSafeInteger(settings.maxAttempts) ? Math.max(1, settings.maxAttempts) : 2;
+    // Every screen of a picture gets its own attempts: three by default. The loop stops earlier
+    // when an attempt does not bring the screen closer to level.
+    const maxAttempts = Number.isSafeInteger(settings.maxAttempts) ? Math.max(1, settings.maxAttempts) : 3;
     // The role looks at its own cut and says whether a screen lost its edges.
     const review = settings.review !== false;
 
     const outDir = path.join(root, workDir, RECTIFIED_DIR);
     await mkdir(outDir, { recursive: true });
     toolset?.setWriteDirs?.([outDir]);
-    const outDirRel = toPosix(path.join(workDir, RECTIFIED_DIR));
 
     const extraTools = toolset?.specsFor
         ? toolset.specsFor('rectifier', RECTIFIER_TOOLS)
@@ -473,38 +520,299 @@ export async function runRectify(state, notify = () => {}) {
 
     const rectified = [];
     const kept = [];
+    /** The canonical file of every screen of the run, so that two screens never share a file. */
+    const usedPaths = new Map();
+    /** Every file of the run that the stage keeps; the cleanup of the output dir spares them. */
+    const keptFiles = new Set();
 
     /**
      * Work on one picture: ask the role about it, project the screens it named, keep what passed.
+     *
+     * Every screen of the picture gets up to `stages.rectify.maxAttempts` attempts (three by
+     * default), and every attempt is projected from the original picture, never from a frame an
+     * earlier attempt produced: a projection on top of a projection only adds the error of the
+     * first one. The best result of a screen wins; a result that is worse than the one that is
+     * already kept is rolled back, and a screen stops trying as soon as an attempt does not bring
+     * it any closer to level. The re-cut of the review is an attempt as well and takes a part of
+     * the same budget.
      * @param {{ rel: string, abs: string }} file the picture to work on
      * @returns {Promise<object[]>} the screens that were accepted
      */
     const processUnit = async (file) => {
-        const accepted = [];
+        const startedAt = Date.now();
         const located = await resolveInside(root, file.rel, { allowRoot: false }).catch(() => null);
         if (!located) {
             warnings.push(`rectify: ${file.rel} is outside the working directory`);
-            return accepted;
+            return [];
         }
         const frame = await rasterInfo(located.abs, { cwd: root, engine }).catch(() => null);
         if (!frame?.width || !frame?.height) {
             warnings.push(`rectify: cannot read ${file.rel}`);
             kept.push({ from: file.rel, kept: true, reason: 'the file cannot be read' });
-            return accepted;
+            return [];
         }
 
         const sourceSkew = await measureResidualSkew(located.abs, { maxSide: 900, maxAngleDeg: 15, stepDeg: 0.1 })
             .catch(() => null);
 
+        /** The screens of this picture and the best result of each of them. */
+        const screens = new Map();
+
+        /**
+         * The state of one screen of the picture: how many attempts it got, the best result that
+         * is kept, whether the last attempt brought it any closer to level and whether the role
+         * already looked at the cut.
+         * @param {string} label
+         * @param {number} index
+         * @returns {object}
+         */
+        const screenState = (label, index) => {
+            const key = screenKey(label, index);
+            let state = screens.get(key);
+            if (!state) {
+                state = {
+                    key,
+                    uid: `${file.rel}::${key}`,
+                    label: String(label ?? '').trim(),
+                    index,
+                    attempts: 0,
+                    best: null,
+                    residual: null,
+                    stopped: false,
+                    reviewed: false,
+                    reason: '',
+                };
+                screens.set(key, state);
+            }
+            return state;
+        };
+
+        /**
+         * The file a screen keeps. The name is canonical — the label of the screen and its
+         * number — so that the same screen always lands in the same file, and two screens of the
+         * run never share one.
+         * @param {object} state
+         * @returns {string}
+         */
+        const canonicalPath = (state) => {
+            const base = path.join(outDir, screenFileName(state.label || state.key, state.index));
+            const owner = usedPaths.get(base);
+            if (!owner || owner === state.uid) {
+                usedPaths.set(base, state.uid);
+                return base;
+            }
+            let n = 2;
+            let candidate = base.replace(/\.png$/i, `-${n}.png`);
+            while (usedPaths.has(candidate) && usedPaths.get(candidate) !== state.uid) {
+                n += 1;
+                candidate = base.replace(/\.png$/i, `-${n}.png`);
+            }
+            usedPaths.set(candidate, state.uid);
+            return candidate;
+        };
+
+        /**
+         * Delete a candidate the stage does not keep. Only the files of the output directory are
+         * touched — the reference and its crops are never touched.
+         * @param {string|null} abs
+         * @param {string|null} [keep] the file of a screen that stays
+         * @returns {Promise<void>}
+         */
+        const discard = async (abs, keep = null) => {
+            if (!abs) return;
+            if (keep && path.resolve(abs) === path.resolve(keep)) return;
+            if (!isInside(outDir, abs)) return;
+            await unlink(abs).catch(() => {});
+        };
+
+        /**
+         * Roll a candidate back: the file of the screen keeps the bytes of the result that was
+         * already accepted.
+         * @param {object} state
+         * @param {string|null} abs
+         * @returns {Promise<void>}
+         */
+        const rollback = async (state, abs) => {
+            if (!abs) return;
+            if (state.best?.bytes && path.resolve(abs) === path.resolve(state.best.abs)) {
+                await writeFile(state.best.abs, state.best.bytes).catch(() => {});
+                return;
+            }
+            await discard(abs, state.best?.abs ?? null);
+        };
+
+        /**
+         * Is the result of a screen already level? A screen that is level has nothing left to
+         * improve: another attempt can only make it worse.
+         * @param {object} state
+         * @returns {boolean}
+         */
+        const isLevel = (state) => Boolean(state.best)
+            && state.best.angle !== null && state.best.angle !== undefined
+            && Math.abs(state.best.angle) <= maxResidualDeg;
+
+        /**
+         * Let the role look at the cut it made and cut it again when a screen lost its edges.
+         *
+         * The re-cut is an attempt as well: it takes a part of the same budget as the
+         * projections, and it is projected on the original picture, never on the cut that is
+         * shown — a projection on top of a projection only adds the error of the first one.
+         * @returns {Promise<void>}
+         */
+        const reviewTheCuts = async () => {
+            const reviewable = [...screens.values()].filter((state) => state.best && !state.reviewed);
+            if (!review || !reviewable.length) return;
+            const scratch = path.join(outDir, '.try-review');
+            await mkdir(scratch, { recursive: true });
+            const scratchRel = toPosix(path.relative(root, scratch));
+            const cuts = reviewable.map((state) => ({ from: file.rel, to: state.best.rel, screen: state.label }));
+            const answer = await reviewCuts({
+                root,
+                roles,
+                file: { rel: file.rel, abs: located.abs },
+                frame,
+                scratchRel,
+                extraTools,
+                model,
+                effort,
+                maxTurns,
+                cuts,
+            }).catch(() => null);
+            for (const state of reviewable) state.reviewed = true;
+            const wanted = answer?.data?.verdict === 'recut' ? producedScreens(answer.data) : [];
+            for (const [index, entry] of wanted.entries()) {
+                const target = cuts.find((item) => sameLabel(item.screen, entry.label)) ?? cuts[index];
+                if (!target) continue;
+                const state = reviewable.find((item) => item.best?.rel === target.to);
+                if (!state?.best) continue;
+                if (state.attempts >= maxAttempts) {
+                    warnings.push(`rectify: ${target.to}: the re-cut was not tried — the screen has no `
+                        + `attempts left (${state.attempts} used)`);
+                    continue;
+                }
+                state.attempts += 1;
+
+                const roleFile = entry.output
+                    ? (path.isAbsolute(entry.output) ? path.resolve(entry.output) : path.resolve(root, entry.output))
+                    : null;
+                const roleValid = roleFile
+                    ? await validateRectifiedFile(roleFile, outDir)
+                    : { ok: false, reason: 'no path given' };
+                let candidateAbs = null;
+                if (entry.quad) {
+                    // The re-cut is projected on the original picture, never on the cut that is
+                    // shown: a projection on top of a projection only adds the error of the first.
+                    candidateAbs = await projectQuad({
+                        source: located.abs,
+                        outDir: scratch,
+                        label: target.screen || entry.label,
+                        quad: entry.quad,
+                        index,
+                        name: null,
+                        cwd: root,
+                        engine,
+                    });
+                } else if (roleValid.ok) {
+                    candidateAbs = roleFile;
+                }
+                if (!candidateAbs) {
+                    warnings.push(`rectify: ${target.to}: the re-cut was not accepted — `
+                        + 'the corners could not be projected');
+                    continue;
+                }
+
+                const filled = await opaqueShare(candidateAbs, engine);
+                if (filled < 0.5) {
+                    // The re-cut is empty: the old cut stays where it was.
+                    await rollback(state, candidateAbs);
+                    warnings.push(`rectify: ${target.to}: the re-cut was not accepted — the projection is empty`);
+                    continue;
+                }
+                const afterFrame = await rasterInfo(candidateAbs, { cwd: root, engine }).catch(() => null);
+                const beforeFrame = state.best.frame;
+                if (beforeFrame?.width && afterFrame?.width
+                    && afterFrame.width * afterFrame.height < beforeFrame.width * beforeFrame.height) {
+                    // A screen that lost its edges is cut too narrow; a re-cut that is smaller
+                    // than the cut it replaces is not a repair.
+                    await rollback(state, candidateAbs);
+                    warnings.push(`rectify: ${target.to}: the re-cut was smaller than the cut it replaces — `
+                        + 'the old cut stays');
+                    continue;
+                }
+                const skew = await measureResidualSkew(candidateAbs, { maxSide: 900, maxAngleDeg: 15, stepDeg: 0.1 })
+                    .catch(() => null);
+                const angle = skew?.angleDeg ?? null;
+                // A re-cut that is clearly less level than the cut it replaces is a degradation:
+                // the old cut stays.
+                const limit = state.best.angle === null || state.best.angle === undefined
+                    ? Infinity
+                    : Math.max(Math.abs(state.best.angle) + minImprovementDeg, maxResidualDeg);
+                if (angle !== null && Math.abs(angle) > limit) {
+                    await rollback(state, candidateAbs);
+                    warnings.push(`rectify: ${target.to}: the re-cut was not accepted — it is less level than the `
+                        + `cut it replaces (${Math.abs(angle).toFixed(1)}°)`);
+                    continue;
+                }
+                // The re-cut is kept: the file of the screen becomes this one.
+                const bytes = await readFile(candidateAbs).catch(() => null);
+                if (!bytes) {
+                    await rollback(state, candidateAbs);
+                    continue;
+                }
+                await writeFile(state.best.abs, bytes);
+                state.best = {
+                    ...state.best,
+                    bytes,
+                    angle: angle ?? state.best.angle,
+                    frame: afterFrame ?? state.best.frame,
+                };
+                await discard(candidateAbs, state.best.abs);
+                state.reason = '';
+                notify({ type: 'rectify.recut', file: target.to, screen: target.screen });
+            }
+            await rm(scratch, { recursive: true, force: true });
+        };
+
         let kind = 'project';
         let note = '';
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        for (let round = 1; round <= maxAttempts; round++) {
+            // The screens that may still be worked on: a screen that has used its attempts, one
+            // that did not get any closer to level, and one that is already level — there is
+            // nothing left to improve — are left alone. A picture that has no screen at all yet
+            // is asked again: the model may still be asked to cut it up.
+            const eligible = [...screens.values()].filter((state) => (
+                state.attempts < maxAttempts && !state.stopped && !isLevel(state)
+            ));
+            if (round > 1 && screens.size && !eligible.length) break;
+
+            // The candidates of this round live in a scratch directory inside the output
+            // directory: the file of an accepted screen is never overwritten by a later attempt.
+            const scratch = path.join(outDir, `.try-${round}`);
+            await mkdir(scratch, { recursive: true });
+            const scratchRel = toPosix(path.relative(root, scratch));
+
+            if (round > 1 && eligible.length) {
+                const lines = ['These screens can still be improved. Work only on them:'];
+                for (const state of eligible) {
+                    const angle = state.best?.angle ?? state.residual ?? null;
+                    const tilt = angle === null || angle === undefined
+                        ? ''
+                        : ` (still measured ${Math.abs(angle).toFixed(1)}° of tilt)`;
+                    lines.push(`  ${state.label || state.key}${tilt}${state.reason ? ` — ${state.reason}` : ''}`);
+                }
+                lines.push('Place the four corners again and project every one of these screens');
+                lines.push(`from the original picture (${file.rel}). Every coordinate belongs to that picture: 0 to`);
+                lines.push(`${frame.width} across and 0 to ${frame.height} down.`);
+                note = lines.join('\n');
+                kind = 'project';
+            }
+
             const result = await askRectifier({
                 root,
                 roles,
                 file: { rel: file.rel, abs: located.abs },
                 frame,
-                outDirRel,
+                scratchRel,
                 extraTools,
                 model,
                 effort,
@@ -513,202 +821,230 @@ export async function runRectify(state, notify = () => {}) {
             });
 
             if (!result?.data) {
+                await rm(scratch, { recursive: true, force: true });
                 warnings.push(`rectify: ${file.rel}: the rectifier did not answer `
                     + `(${result?.error ?? result?.status ?? 'unknown'}); the frame stays as it is`);
-                kept.push({ from: file.rel, kept: true, reason: 'the rectifier did not answer' });
+                if (!screens.size) {
+                    kept.push({ from: file.rel, kept: true, reason: 'the rectifier did not answer' });
+                }
                 break;
             }
             if (result.data.verdict === 'keep') {
-                kept.push({ from: file.rel, kept: true, reason: result.data.assessment || 'the frame is level' });
+                await rm(scratch, { recursive: true, force: true });
+                if (!screens.size) {
+                    kept.push({ from: file.rel, kept: true, reason: result.data.assessment || 'the frame is level' });
+                }
                 break;
             }
 
             const produced = producedScreens(result.data);
             if (!produced.length) {
-                if (attempt < maxAttempts) {
+                await rm(scratch, { recursive: true, force: true });
+                if (round < maxAttempts) {
                     kind = 'split';
                     note = SPLIT_NOTE;
                     continue;
                 }
-                kept.push({ from: file.rel, kept: true, reason: result.data.assessment || 'no file in screens' });
+                if (!screens.size) {
+                    kept.push({ from: file.rel, kept: true, reason: result.data.assessment || 'no file in screens' });
+                }
                 break;
             }
 
-            let residual = null;
-            const missing = [];
             for (const [index, entry] of produced.entries()) {
-                let outputAbs = path.isAbsolute(entry.output) ? path.resolve(entry.output) : path.resolve(root, entry.output);
-                let valid = await validateRectifiedFile(outputAbs, outDir);
-                if (!valid.ok) {
-                    // The role named the corners but did not write the file. The projection is
-                    // deterministic, so the stage does it: the screen is cut out and levelled even
-                    // when the model answered with the plan and forgot the tool call.
+                const state = screenState(entry.label, index);
+                // The cap of the attempts, and the screen that stopped getting better.
+                if (state.attempts >= maxAttempts) continue;
+                if (state.stopped) continue;
+                state.attempts += 1;
+
+                const roleFile = entry.output
+                    ? (path.isAbsolute(entry.output) ? path.resolve(entry.output) : path.resolve(root, entry.output))
+                    : null;
+                const roleValid = roleFile
+                    ? await validateRectifiedFile(roleFile, outDir)
+                    : { ok: false, reason: 'no path given' };
+
+                // The candidate of this attempt. The corners of the answer are projected on the
+                // original picture: a projection on top of a projection only adds the error of
+                // the first one. The file of the role is a candidate only when it named no corners.
+                let candidateAbs = null;
+                if (entry.quad) {
                     const projected = await projectQuad({
                         source: located.abs,
-                        outDir,
-                        label: entry.label,
+                        outDir: scratch,
+                        label: state.label || entry.label || 'screen',
                         quad: entry.quad,
                         index,
-                        name: path.basename(entry.output ?? ''),
+                        name: null,
                         cwd: root,
                         engine,
                     });
                     if (projected) {
-                        outputAbs = projected;
-                        valid = await validateRectifiedFile(outputAbs, outDir);
-                        if (valid.ok) {
+                        candidateAbs = projected;
+                        if (!roleValid.ok) {
                             notify({
                                 type: 'rectify.projected',
-                                file: toPosix(path.relative(root, outputAbs)),
-                                screen: entry.label,
+                                file: toPosix(path.relative(root, projected)),
+                                screen: state.label,
                             });
                         }
                     }
+                } else if (roleValid.ok) {
+                    candidateAbs = roleFile;
                 }
-                if (!valid.ok) {
-                    // The file is missing and the corners could not be projected: the model has to
-                    // place them again, and the reader has to know what was wrong.
-                    const reason = valid.reason === 'the output file was not found'
+
+                if (!candidateAbs) {
+                    const reason = roleValid.reason === 'the output file was not found'
                         ? 'the file was not written and the corners could not be projected'
-                        : valid.reason;
-                    warnings.push(`rectify: ${file.rel}: the result "${entry.output}" was not accepted — ${reason}`);
-                    missing.push(`${entry.output} (${reason})`);
+                        : roleValid.reason;
+                    warnings.push(`rectify: ${file.rel}: the result "${entry.output ?? state.label}" was not accepted — ${reason}`);
+                    state.reason = reason;
                     continue;
                 }
-                const to = toPosix(path.relative(root, outputAbs));
-                if (to === file.rel) {
-                    warnings.push(`rectify: ${file.rel}: the rectifier returned the path of the source — `
-                        + 'the original file is never overwritten');
+                if (path.resolve(candidateAbs) === path.resolve(located.abs)) {
+                    const reason = 'the rectifier returned the path of the source — the original file is never overwritten';
+                    warnings.push(`rectify: ${file.rel}: ${reason}`);
+                    state.reason = reason;
                     continue;
                 }
 
-                const resultSkew = await measureResidualSkew(outputAbs, { maxSide: 900, maxAngleDeg: 15, stepDeg: 0.1 })
+                const resultSkew = await measureResidualSkew(candidateAbs, { maxSide: 900, maxAngleDeg: 15, stepDeg: 0.1 })
                     .catch(() => null);
+                const angle = resultSkew?.angleDeg ?? null;
                 // A projection of wrong corners comes out empty: that is not a screen.
-                const filled = await opaqueShare(outputAbs, engine);
+                const filled = await opaqueShare(candidateAbs, engine);
                 if (filled < 0.5) {
-                    warnings.push(`rectify: ${to}: the screen was not accepted — the projection is empty `
-                        + `(${Math.round(filled * 100)}% of the file carries pixels)`);
-                    await unlink(outputAbs).catch(() => {});
+                    const reason = `the projection is empty (${Math.round(filled * 100)}% of the file carries pixels)`;
+                    warnings.push(`rectify: ${file.rel}: the screen "${state.label || entry.label}" was not accepted — ${reason}`);
+                    await rollback(state, candidateAbs);
+                    state.reason = reason;
+                    state.residual = angle;
                     continue;
                 }
+
                 // The tilt gate protects a single screen from being warped. When one picture is cut
                 // into several screens, the projection is the cut itself and the tilt of the whole
-                // collage says nothing about the screens it holds.
+                // picture says nothing about the screens it holds.
                 if (resultSkew && sourceSkew && produced.length === 1) {
                     const accept = acceptsRectification(sourceSkew, resultSkew, maxResidualDeg, minImprovementDeg);
                     if (!accept.ok) {
-                        warnings.push(`rectify: ${to}: the screen was not accepted — ${accept.reason}`);
-                        await unlink(outputAbs).catch(() => {});
-                        residual = resultSkew.angleDeg;
+                        warnings.push(`rectify: ${file.rel}: the screen "${state.label || entry.label}" was not accepted — ${accept.reason}`);
+                        await rollback(state, candidateAbs);
+                        state.reason = accept.reason;
+                        state.residual = angle;
                         continue;
                     }
                 }
 
+                // The best result of the screen wins. A result that is not flatter than the one
+                // that is already kept is rolled back: the file of the screen stays as it was,
+                // and the screen stops trying — there is nothing left to improve.
+                const previousAngle = state.best?.angle ?? null;
+                const better = !state.best
+                    || (previousAngle === null
+                        ? angle !== null
+                        : betterAngle(angle, previousAngle, minImprovementDeg));
+                if (!better) {
+                    const reason = !state.best
+                        ? 'the tilt of the result cannot be measured'
+                        : previousAngle === null
+                            ? 'the tilt of the previous result cannot be measured, so the new one cannot be compared with it'
+                            : `not better than the result of the previous attempt (${Math.abs(previousAngle).toFixed(1)}°)`;
+                    warnings.push(`rectify: ${file.rel}: the screen "${state.label || entry.label}" was not accepted — ${reason}`);
+                    await rollback(state, candidateAbs);
+                    state.reason = reason;
+                    state.residual = angle;
+                    state.stopped = true;
+                    continue;
+                }
+
+                // The result is kept: the file of the screen becomes this one.
+                const bytes = await readFile(candidateAbs).catch(() => null);
+                if (!bytes) {
+                    const reason = 'the file of the result cannot be read';
+                    warnings.push(`rectify: ${file.rel}: the screen "${state.label || entry.label}" was not accepted — ${reason}`);
+                    await rollback(state, candidateAbs);
+                    state.reason = reason;
+                    continue;
+                }
+                // The accepted screen lives under its canonical name; the files of the attempts
+                // that lost are deleted.
+                const finalAbs = canonicalPath(state);
+                await writeFile(finalAbs, bytes);
+                await discard(candidateAbs, finalAbs);
+                if (state.best && path.resolve(state.best.abs) !== path.resolve(finalAbs)) {
+                    await discard(state.best.abs);
+                }
+                state.best = {
+                    abs: finalAbs,
+                    rel: toPosix(path.relative(root, finalAbs)),
+                    bytes,
+                    angle,
+                    confidence: resultSkew?.confidence ?? null,
+                    frame: await rasterInfo(finalAbs, { cwd: root, engine }).catch(() => null),
+                    assessment: result.data.assessment ?? '',
+                };
+                state.reason = '';
                 notify({
                     type: 'rectify.file',
-                    file: to,
+                    file: state.best.rel,
                     from: file.rel,
-                    screen: entry.label,
+                    screen: state.label,
                     before: sourceSkew?.angleDeg ?? null,
-                    after: resultSkew?.angleDeg ?? null,
-                });
-                accepted.push({
-                    from: file.rel,
-                    to,
-                    screen: entry.label,
-                    before: sourceSkew?.angleDeg ?? null,
-                    after: resultSkew?.angleDeg ?? null,
-                    confidence: resultSkew?.confidence ?? null,
-                    assessment: result.data.assessment ?? '',
+                    after: angle,
                 });
             }
 
-            if (accepted.length) break;
-            if (attempt < maxAttempts) {
-                if (missing.length) {
-                    // The model named the files but wrote nothing: it has to call the tool, or name
-                    // the corners so that the stage can project them.
-                    kind = 'split';
-                    note = `These results were refused: ${missing.join('; ')}. Call correct_perspective for every `
-                        + 'screen of this picture and name the four corners of each screen in your answer as well, so the '
-                        + 'screen can be cut out and levelled even if the tool call does not come through. The corners '
-                        + 'belong to the interface of the screen, inside the picture: 0 to '
-                        + `${frame.width} across and 0 to ${frame.height} down.`;
-                    continue;
-                }
-                kind = residual === null ? 'split' : 'project';
-                note = residual === null
-                    ? SPLIT_NOTE
-                    : `The previous result still measured ${residual.toFixed(1)}° of tilt. Place the corners `
-                        + 'again, a little wider, and project the screen once more.';
-                continue;
-            }
-            kept.push({ from: file.rel, kept: true, reason: 'no screen passed the tilt check' });
+            await rm(scratch, { recursive: true, force: true });
         }
 
-        // The cut is checked by the role itself: a screen that lost its edges is cut again.
-        if (accepted.length && review) {
-            const answer = await reviewCuts({
-                root,
-                roles,
-                file: { rel: file.rel, abs: located.abs },
-                frame,
-                outDirRel,
-                extraTools,
-                model,
-                effort,
-                maxTurns,
-                cuts: accepted,
-            }).catch(() => null);
-            const wanted = answer?.data?.verdict === 'recut' ? producedScreens(answer.data) : [];
-            for (const [index, entry] of wanted.entries()) {
-                const target = accepted.find((item) => sameLabel(item.screen, entry.label)) ?? accepted[index];
-                if (!target) continue;
-                const targetAbs = path.resolve(root, target.to);
-                const before = await readFile(targetAbs).catch(() => null);
-                const beforeFrame = before ? await rasterInfo(targetAbs, { cwd: root, engine }).catch(() => null) : null;
-                let written = null;
-                if (entry.quad) {
-                    written = await projectQuad({
-                        source: located.abs,
-                        outDir,
-                        label: target.screen || entry.label,
-                        quad: entry.quad,
-                        index,
-                        name: path.basename(target.to),
-                        cwd: root,
-                        engine,
-                    });
-                } else if (entry.output) {
-                    // The role wrote the file itself: it is the new cut, and it replaces the old one.
-                    const abs = path.isAbsolute(entry.output) ? path.resolve(entry.output) : path.resolve(root, entry.output);
-                    const valid = await validateRectifiedFile(abs, outDir);
-                    if (valid.ok) {
-                        await writeFile(targetAbs, await readFile(abs));
-                        written = targetAbs;
-                    }
-                }
-                if (!written) continue;
-                const filled = await opaqueShare(written, engine);
-                if (filled < 0.5) {
-                    // The re-cut is empty: the old cut stays where it was.
-                    if (before) await writeFile(targetAbs, before);
-                    warnings.push(`rectify: ${target.to}: the re-cut was not accepted — the projection is empty`);
-                    continue;
-                }
-                const afterFrame = await rasterInfo(written, { cwd: root, engine }).catch(() => null);
-                if (beforeFrame?.width && afterFrame?.width
-                    && afterFrame.width * afterFrame.height < beforeFrame.width * beforeFrame.height) {
-                    // A screen that lost its edges is cut too narrow; a re-cut that is smaller than
-                    // the cut it replaces is not a repair.
-                    if (before) await writeFile(targetAbs, before);
-                    warnings.push(`rectify: ${target.to}: the re-cut was smaller than the cut it replaces — `
-                        + 'the old cut stays');
-                    continue;
-                }
-                notify({ type: 'rectify.recut', file: target.to, screen: target.screen });
+        // The role looks at the cut it made: a screen that lost its edges is cut again.
+        await reviewTheCuts();
+
+        const accepted = [];
+        const failed = [];
+        for (const state of screens.values()) {
+            if (!state.best) {
+                failed.push(state);
+                continue;
             }
+            accepted.push({
+                from: file.rel,
+                to: state.best.rel,
+                screen: state.label,
+                before: sourceSkew?.angleDeg ?? null,
+                after: state.best.angle,
+                confidence: state.best.confidence,
+                assessment: state.best.assessment,
+            });
+            keptFiles.add(path.resolve(root, state.best.rel));
+        }
+        // The picture that could not be cut is kept as it is; the reason of the first screen that
+        // failed tells why.
+        if (failed.length && !accepted.length) {
+            kept.push({
+                from: file.rel,
+                kept: true,
+                reason: failed[0].reason || 'no screen passed the tilt check',
+            });
+        }
+
+        // The output directory holds the screens of the run and nothing else: the files that were
+        // written during this attempt and that nobody kept are removed.
+        const leftovers = await readdir(outDir, { withFileTypes: true }).catch(() => []);
+        for (const item of leftovers) {
+            const abs = path.join(outDir, item.name);
+            if (item.isDirectory()) {
+                if (item.name.startsWith('.try-')) await rm(abs, { recursive: true, force: true });
+                continue;
+            }
+            if (!item.isFile()) continue;
+            if (accepted.some((entry) => path.resolve(root, entry.to) === abs)) continue;
+            if (keptFiles.has(path.resolve(abs))) continue;
+            const info = await stat(abs).catch(() => null);
+            if (!info || info.mtimeMs < startedAt) continue;
+            await unlink(abs).catch(() => {});
         }
 
         return accepted;

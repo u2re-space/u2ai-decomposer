@@ -24,6 +24,7 @@ import {
     RECTIFIED_DIR,
 } from '../src/stages/rectify.js';
 import { defaults, validateConfig } from '../src/config.js';
+import { measureResidualSkew } from '../src/image/skew.js';
 
 const SCREEN_REL = 'decomposition/screens/01-home.png';
 const RECT_REL = `decomposition/${RECTIFIED_DIR}/01-home.png`;
@@ -293,7 +294,10 @@ test('the re-correct pass asks again when the tilt did not go down', async () =>
         assert.equal(calls.length, 2, 'the role is asked once more');
         assert.match(calls[1].params.text, /still measured/);
         const accepted = state.rectified.find((item) => item.to);
-        assert.equal(accepted.to, `decomposition/${RECTIFIED_DIR}/02-home.png`, state.warnings.join('; '));
+        // The screen keeps its canonical name, whatever the file the role happened to write.
+        assert.equal(accepted.to, RECT_REL, state.warnings.join('; '));
+        const frame = await sharp(path.join(root, accepted.to)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        assert.equal(frame.info.width, 320);
     } finally {
         await rm(root, { recursive: true, force: true });
     }
@@ -552,6 +556,94 @@ test('a cut the role is happy with stays as it is', async () => {
         await runRectify(state, () => {});
 
         assert.equal(calls.length, 2);
+        const accepted = state.rectified.find((item) => item.to);
+        const frame = await sharp(path.join(root, accepted.to)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        assert.equal(frame.info.width, 200, 'the first cut stays');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// The attempts of a screen
+// ---------------------------------------------------------------------------
+
+test('the best result wins and a worse one is rolled back', async () => {
+    const root = await workDirWith(8);
+    try {
+        const rectDir = path.join(root, 'decomposition', RECTIFIED_DIR);
+        await mkdir(rectDir, { recursive: true });
+        await writeFile(path.join(rectDir, '01-home.png'), await stripes(4));
+        await writeFile(path.join(rectDir, '02-home.png'), await stripes(5));
+        const calls = [];
+        const state = stateFor(root, mockRoles([
+            { verdict: 'rectified', assessment: '', screens: [{ label: 'home', output: RECT_REL, quad: null }] },
+            { verdict: 'rectified', assessment: '', screens: [{ label: 'home', output: `decomposition/${RECTIFIED_DIR}/02-home.png`, quad: null }] },
+        ], calls));
+        state.config.stages.rectify.maxAttempts = 3;
+        await runRectify(state, () => {});
+        assert.equal(calls.length, 2, 'a screen that did not get any better stops asking');
+        assert.match(state.warnings.join('\n'), /not better than the result of the previous attempt/);
+        const accepted = state.rectified.find((item) => item.to);
+        assert.equal(accepted.to, RECT_REL);
+        // The screen keeps the flatter result, not the one that came later.
+        const skew = await measureResidualSkew(path.join(root, accepted.to), { maxSide: 900, maxAngleDeg: 15, stepDeg: 0.1 });
+        assert.ok(Math.abs(skew.angleDeg - 4) < 0.5, `the better result is kept (${skew.angleDeg}°)`);
+        assert.equal(await stat(path.join(rectDir, '02-home.png')).catch(() => null), null,
+            'the worse result is deleted');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('a screen that is level is not asked again', async () => {
+    const root = await workDirWith();
+    try {
+        const rectDir = path.join(root, 'decomposition', RECTIFIED_DIR);
+        await mkdir(rectDir, { recursive: true });
+        await writeFile(path.join(rectDir, '01-home.png'), await stripes(0));
+        const calls = [];
+        const state = stateFor(root, mockRoles({
+            verdict: 'rectified',
+            assessment: '',
+            screens: [{ label: 'home', output: RECT_REL, quad: null }],
+        }, calls));
+        state.config.stages.rectify.maxAttempts = 3;
+        await runRectify(state, () => {});
+        assert.equal(calls.length, 1, 'there is nothing left to improve');
+        assert.equal(state.rectified.find((item) => item.to)?.to, RECT_REL);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the re-cut takes a part of the same budget', async () => {
+    const root = await workDirWith();
+    try {
+        const calls = [];
+        const state = reviewState(root, mockRoles([
+            {
+                verdict: 'rectified',
+                assessment: 'three phones',
+                screens: [{
+                    label: 'home',
+                    output: '',
+                    quad: { tl: { x: 40, y: 40 }, tr: { x: 240, y: 40 }, br: { x: 240, y: 200 }, bl: { x: 40, y: 200 } },
+                }],
+            },
+            {
+                verdict: 'recut',
+                assessment: 'the screen was cut off',
+                screens: [{
+                    label: 'home',
+                    output: '',
+                    quad: { tl: { x: 10, y: 10 }, tr: { x: 300, y: 10 }, br: { x: 300, y: 230 }, bl: { x: 10, y: 230 } },
+                }],
+            },
+        ], calls));
+        state.config.stages.rectify.maxAttempts = 1;
+        await runRectify(state, () => {});
+        assert.match(state.warnings.join('\n'), /the re-cut was not tried/);
         const accepted = state.rectified.find((item) => item.to);
         const frame = await sharp(path.join(root, accepted.to)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
         assert.equal(frame.info.width, 200, 'the first cut stays');
