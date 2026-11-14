@@ -203,6 +203,27 @@ export function validateConfig(config) {
     if (!(Number.isSafeInteger(value) && value > 0)) fail(`limits.${key}: положительное целое`);
   }
 
+  if (!isRecord(c.batch)) fail('batch должен быть объектом');
+  for (const key of Object.keys(c.batch)) if (!(key in defaults.batch)) fail(`batch.${key}: неизвестное поле`);
+  if (typeof c.batch.enabled !== 'boolean') fail('batch.enabled: true | false');
+  if (c.batch.endpoint !== null && (typeof c.batch.endpoint !== 'string' || !c.batch.endpoint.startsWith('/'))) {
+    fail('batch.endpoint: путь, начинающийся с /, или null');
+  }
+  if (c.batch.window !== '24h') fail('batch.window: 24h');
+  if (!(Number.isSafeInteger(c.batch.collectMs) && c.batch.collectMs >= 100 && c.batch.collectMs <= 60_000)) {
+    fail('batch.collectMs: целое 100..60000');
+  }
+  if (!(Number.isSafeInteger(c.batch.pollMs) && c.batch.pollMs >= 1000 && c.batch.pollMs <= 600_000)) {
+    fail('batch.pollMs: целое 1000..600000');
+  }
+  if (!(Number.isSafeInteger(c.batch.waitMs) && c.batch.waitMs >= 0 && c.batch.waitMs <= 86_400_000)) {
+    fail('batch.waitMs: целое 0..86400000');
+  }
+  if (!(Number.isSafeInteger(c.batch.maxRequests) && c.batch.maxRequests >= 1 && c.batch.maxRequests <= 1000)) {
+    fail('batch.maxRequests: целое 1..1000');
+  }
+  if (typeof c.batch.journalDir !== 'string' || !c.batch.journalDir.trim()) fail('batch.journalDir: непустая строка');
+
   for (const [key, value] of Object.entries(c.tools)) {
     if (!(key in defaults.tools) || typeof value !== 'boolean') fail(`tools.${key}: true | false (известные: ${Object.keys(defaults.tools).join(', ')})`);
   }

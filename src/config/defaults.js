@@ -89,6 +89,34 @@ export const defaults = {
     },
   },
 
+  // --- batch ----------------------------------------------------------------
+  /**
+   * The batch route of the hosts: a file of requests goes out, the answers come back later.
+   *
+   * The route is two-phase: the first run submits the requests of a parallel round as one batch
+   * and stops, the second run takes the answers and goes on. Only the stages whose calls run in
+   * parallel are batched, and only the hosts that carry the flag `supports: { batch: true }` take
+   * part in it.
+   */
+  batch: {
+    /** Use the batch route even without `--batch` on the command line. */
+    enabled: false,
+    /** The route of the batch; null means the route of the host. */
+    endpoint: null,
+    /** The window the host serves the batch in. */
+    window: '24h',
+    /** How long the queue of a parallel round waits for the last request, ms. */
+    collectMs: 1500,
+    /** How often the state of a batch is asked for, ms. */
+    pollMs: 5000,
+    /** How long `--batch-fetch` waits for a batch that is not done yet, ms. */
+    waitMs: 0,
+    /** Max requests in one batch. */
+    maxRequests: 64,
+    /** Where the journal of the answers is kept, relative to the output directory. */
+    journalDir: 'decomposition/.batch',
+  },
+
   // --- limits ---------------------------------------------------------------
   limits: {
     /** Wall-clock budget per stage. */
@@ -301,14 +329,21 @@ export function cloneDefaults() {
  * fields a user is expected to edit; everything else stays on the defaults.
  */
 export function defaultConfigText() {
+  // The hosts that serve the batch route carry the flag that says so: the requests of a
+  // parallel round may go out as one batch there.
+  const batchHosts = new Set(['https://api.proxyapi.ru/v1', 'https://sprutdock.ru/v1']);
+  const withBatch = (list) => structuredClone(list).map((item) => (
+    batchHosts.has(item.baseURL) ? { ...item, supports: { ...(item.supports ?? {}), batch: true } } : item
+  ));
   const starter = {
     model: defaults.model,
     imageModel: defaults.imageModel,
     reasoning: { effort: 'xhigh', summary: 'auto' },
-    backends: structuredClone(defaults.backends),
+    backends: withBatch(defaults.backends),
     imagesBackends: structuredClone(defaults.imagesBackends),
     layerBackends: structuredClone(defaults.layerBackends),
     fallback: structuredClone(defaults.fallback),
+    batch: { enabled: false },
     stages: { extend: { padFraction: 0.125 }, resolve: { layers: false } },
   };
   return `${JSON.stringify(starter, null, 2)}\n`;

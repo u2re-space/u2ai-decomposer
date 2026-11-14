@@ -26,6 +26,10 @@ import {
     backgroundValue, encodeMultipart, imageSizeFields, imageSources, sniffImage,
 } from './images.js';
 import { fallbackChain } from './fallback.js';
+import {
+    BATCH_ENDPOINT, BATCH_WINDOW, BATCH_SUBMITTED, batchEndpointFor, createBatcher,
+    fetchBatch, submitBatch,
+} from './batch.js';
 
 /** Statuses worth another try on the same backend. */
 const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
@@ -211,10 +215,17 @@ export function streamUnsupported(error) {
  *
  * The client owns the transport only: it knows the routes, the retries and the rotation
  * between hosts. What a request means is decided by the caller (roles, stages).
- * @param {{ config: object, env?: object, signal?: AbortSignal|null, onEvent?: Function|null }} opts
+ * @param {{ config: object, env?: object, signal?: AbortSignal|null, onEvent?: Function|null,
+ *   batch?: { mode?: 'off'|'submit'|'fetch', journal?: object|null, collectMs?: number,
+ *     pollMs?: number, waitMs?: number, maxRequests?: number, window?: string,
+ *     endpoint?: string|null }|null }} opts
+ *   `batch` turns on the two-phase batch route: the requests of a parallel round go out as one
+ *   batch in the `submit` phase, and the answers are taken from the journal in the `fetch` phase.
  * @returns {Promise<object>}
  */
-export async function createClient({ config, env = process.env, signal = null, onEvent = null } = {}) {
+export async function createClient({
+    config, env = process.env, signal = null, onEvent = null, batch = null,
+} = {}) {
     const transport = createHttp({
         idleTimeoutMs: requestTimeoutMs(config, 'text'),
         connectTimeoutMs: 30_000,
@@ -225,6 +236,21 @@ export async function createClient({ config, env = process.env, signal = null, o
     const announce = (event) => { try { onEvent?.(event); } catch { /* an observer never breaks a request */ } };
     /** The hosts that refused for the lack of money: they are not asked again in this run. */
     const brokeHosts = new Set();
+
+    // The batch route is two-phase: the requests go out in one run and the answers come in
+    // another. The journal is what the two phases share.
+    const batchMode = batch?.mode === 'submit' || batch?.mode === 'fetch';
+    const journal = batch?.journal ?? null;
+    const batchOptions = {
+        collectMs: Number.isSafeInteger(batch?.collectMs) ? batch.collectMs : 1500,
+        pollMs: Number.isSafeInteger(batch?.pollMs) ? batch.pollMs : 5000,
+        waitMs: Number.isSafeInteger(batch?.waitMs) ? batch.waitMs : 0,
+        maxRequests: Number.isSafeInteger(batch?.maxRequests) ? batch.maxRequests : 64,
+        window: typeof batch?.window === 'string' && batch.window.trim() ? batch.window.trim() : BATCH_WINDOW,
+        endpoint: typeof batch?.endpoint === 'string' && batch.endpoint.trim() ? batch.endpoint.trim() : null,
+    };
+    /** The queue of the requests of a parallel round; it is created when the first one arrives. */
+    let batcher = null;
 
     /**
      * Build an ApiError out of a failed response.
@@ -339,24 +365,39 @@ export async function createClient({ config, env = process.env, signal = null, o
     }
 
     /**
+     * Read a text answer.
+     *
+     * Some files are not JSON: the result file of a batch is JSONL, one answer per line, and a
+     * parser that expects a single JSON object would call it an empty answer.
+     * @param {AsyncGenerator<Buffer>} body
+     * @returns {Promise<string>}
+     * @ai.hint io
+     */
+    async function readText(body) {
+        const raw = await readBody(body, defaults.maxResponseBytes);
+        return raw.toString('utf8');
+    }
+
+    /**
      * Call one route on one backend, without the rotation.
      * The channels below need it: a task id belongs to the host that created it.
      * @param {object} backend
      * @param {string} path route relative to the base URL
-     * @param {{ method?: string, body?: object, rawBody?: Buffer|string, contentType?: string, signal?: AbortSignal|null, stream?: boolean, onEvent?: Function|null, model?: string|null, idleTimeout?: number|null }} options
+     * @param {{ method?: string, body?: object, rawBody?: Buffer|string, contentType?: string, signal?: AbortSignal|null, stream?: boolean, onEvent?: Function|null, model?: string|null, idleTimeout?: number|null, raw?: boolean }} options
      * @returns {Promise<object>}
      * @ai.hint io
      */
     async function callBackend(backend, path, {
         method = 'POST', body = null, rawBody = null, contentType = 'application/json',
         signal: callSignal = null, stream = false, onEvent: callEvent = null, model = null,
-        idleTimeout: callTimeout = null,
+        idleTimeout: callTimeout = null, raw = false,
     } = {}) {
         announce({ type: 'request.start', backend: backend.baseURL, path, model });
         const { res } = await send(backend, path, {
             method, body, rawBody, contentType, signal: callSignal, stream, onEvent: callEvent,
             idleTimeout: callTimeout,
         });
+        if (raw) return await readText(res.body);
         return stream
             ? await readStream(res.body, { kind: stream === 'chat' ? 'chat' : 'responses', model, onEvent: callEvent })
             : await readJson(res.body);
@@ -435,8 +476,182 @@ export async function createClient({ config, env = process.env, signal = null, o
     }
 
     /**
+     * The hosts that serve the batch route.
+     *
+     * A host takes part in a batch only when the config says so: the flag `supports.batch` is
+     * the promise of the host that it serves the route of the batch.
+     * @returns {Array<{ baseURL: string, apiKey: string|null, headers: object, body: object, supports: object }>}
+     * @ai.hint pure
+     */
+    function batchHosts() {
+        return resolveBackends(config, { kind: 'text', env })
+            .filter((backend) => backend.supports?.batch === true && backend.apiKey && !brokeHosts.has(backend.baseURL));
+    }
+
+    /**
+     * The queue of the requests of a parallel round.
+     * @returns {{ add: Function, flush: Function, size: Function }}
+     * @ai.hint io
+     */
+    function ensureBatcher() {
+        if (batcher) return batcher;
+        batcher = createBatcher({
+            collectMs: batchOptions.collectMs,
+            maxRequests: batchOptions.maxRequests,
+            announce,
+            // A batch that did not work out is not the end of the run: the requests go the usual way.
+            send: async (params) => await responsesCreate(params, { noBatch: true }),
+            run: async (group) => await submitGroup(group),
+        });
+        return batcher;
+    }
+
+    /**
+     * Submit one group of requests as a batch and remember it in the journal.
+     *
+     * The answers are not here yet — the host works on the batch in the background — so the round
+     * is over: every request of the group is refused with the error that stops the run.
+     * @param {Array<{ customId: string, model: string|null, body: object, hash: string|null }>} group
+     * @returns {Promise<{ pending: true, batchId: string }>}
+     * @ai.hint io
+     */
+    async function submitGroup(group) {
+        const hosts = batchHosts();
+        if (!hosts.length) {
+            throw new ApiError('No host serves the batch route.', { code: 'NO_BACKEND' });
+        }
+        let lastError = null;
+        for (const backend of hosts) {
+            const endpoint = batchOptions.endpoint || batchEndpointFor(backend.baseURL);
+            const channel = { call: (path, options = {}) => callBackend(backend, path, options) };
+            const requests = group.map((item) => ({
+                customId: item.customId,
+                url: endpoint,
+                body: item.body,
+            }));
+            try {
+                const submitted = await submitBatch({
+                    channel,
+                    requests,
+                    endpoint,
+                    window: batchOptions.window,
+                    signal,
+                });
+                for (const item of group) {
+                    await journal?.rememberRequest(item.hash, { customId: item.customId, model: item.model });
+                }
+                await journal?.saveBatch({
+                    id: submitted.id,
+                    host: backend.baseURL,
+                    endpoint,
+                    status: submitted.status,
+                    requests: group.map((item) => ({
+                        customId: item.customId,
+                        hash: item.hash,
+                        model: item.model,
+                    })),
+                });
+                announce({
+                    type: 'batch.submit',
+                    id: submitted.id,
+                    host: backend.baseURL,
+                    endpoint,
+                    requests: group.length,
+                    status: submitted.status,
+                });
+                return { pending: true, batchId: submitted.id };
+            } catch (error) {
+                lastError = error;
+                announce({
+                    type: 'request.error',
+                    backend: backend.baseURL,
+                    status: error?.status ?? null,
+                    error: error?.message ?? String(error),
+                });
+                if (outOfCredit(error)) {
+                    brokeHosts.add(backend.baseURL);
+                    announce({ type: 'host.broke', backend: backend.baseURL, error: error?.message ?? String(error) });
+                }
+            }
+        }
+        throw lastError ?? new ApiError('No host took the batch.', { code: 'NO_BACKEND' });
+    }
+
+    /**
+     * The second phase of the batch: take the answers of the submitted batches into the journal.
+     *
+     * A batch that is not done yet is not an error: the run says so and stops, and the user runs
+     * the fetch again when the host has finished the work.
+     * @param {{ waitMs?: number|null }} [options]
+     * @returns {Promise<{ ready: boolean, batches: Array<object> }>}
+     * @ai.hint io
+     */
+    async function fetchBatches({ waitMs = null } = {}) {
+        if (!journal) return { ready: true, batches: [] };
+        const rows = await journal.listBatches();
+        const pending = rows.filter((row) => !row.done);
+        const report = [];
+        for (const row of pending) {
+            const backend = resolveBackends(config, { kind: 'text', env })
+                .find((item) => item.baseURL === row.host);
+            if (!backend || !backend.apiKey) {
+                announce({ type: 'batch.missing', id: row.id, host: row.host });
+                report.push({ id: row.id, ready: false, status: 'the host is not known' });
+                continue;
+            }
+            const channel = { call: (path, options = {}) => callBackend(backend, path, options) };
+            const result = await fetchBatch({
+                channel,
+                id: row.id,
+                pollMs: batchOptions.pollMs,
+                waitMs: waitMs ?? batchOptions.waitMs,
+                signal,
+                onPoll: (info) => announce({ type: 'batch.poll', ...info }),
+            });
+            if (!result.ready) {
+                announce({ type: 'batch.pending', id: row.id, status: result.status });
+                report.push({ id: row.id, ready: false, status: result.status });
+                continue;
+            }
+            let answers = 0;
+            for (const request of row.requests ?? []) {
+                const answer = result.results.get(request.customId);
+                if (!answer) {
+                    await journal.writeError(request.hash, 'the batch has no answer for this request');
+                    continue;
+                }
+                if (!answer.ok) {
+                    await journal.writeError(request.hash, answer.error ?? 'the request failed in the batch');
+                    continue;
+                }
+                await journal.writeJson(request.hash, answer.body);
+                answers += 1;
+            }
+            await journal.updateBatch(row.id, {
+                done: true,
+                status: 'completed',
+                fetchedAt: new Date().toISOString(),
+            });
+            announce({
+                type: 'batch.fetched',
+                id: row.id,
+                host: row.host,
+                requests: (row.requests ?? []).length,
+                answers,
+            });
+            report.push({ id: row.id, ready: true, answers });
+        }
+        return { ready: report.every((item) => item.ready), batches: report };
+    }
+
+    /**
      * The Responses API with a Chat Completions fallback for hosts without the route.
+     *
+     * A request that may be a part of a parallel round says so: `batchable` is true when the
+     * request is the whole question of the role — one turn, no tool loop — and the stage runs
+     * several of them at once. Those requests go into the batch instead of going out one by one.
      * @param {object} params
+     * @param {{ noBatch?: boolean }} [options] `noBatch` keeps the request out of the queue
      * @returns {Promise<object>} the answer in the Responses shape
      */
     async function responsesCreate({
@@ -445,7 +660,8 @@ export async function createClient({ config, env = process.env, signal = null, o
         mode = null, maxOutputTokens = null, temperature = null, store = false, truncation = null,
         verbosity = null, stream = false, signal: callSignal = null, onEvent: callEvent = null,
         previousResponseId = null, toolChoice = null, parallelToolCalls = null,
-    } = {}) {
+        batchable = false,
+    } = {}, { noBatch = false } = {}) {
         // The hosts are tried one after another inside `call`. When every one of them refuses
         // the model — no balance, no route — the next model of the fallback chain takes it.
         const wantedModel = model ?? config?.model ?? null;
@@ -453,13 +669,51 @@ export async function createClient({ config, env = process.env, signal = null, o
         const candidates = chain.length ? chain : [model];
         let lastError = null;
         for (const [index, candidate] of candidates.entries()) {
+            // The body of the request without the stream: the hash of it is the name of the
+            // request, and the body of a line of a batch is exactly this one.
+            const canonical = buildResponsesBody({
+                model: candidate, instructions, input, parts, tools, schema, schemaName, strict,
+                effort, summary, mode, maxOutputTokens, temperature, store, truncation, verbosity,
+                stream: false, previousResponseId, toolChoice, parallelToolCalls,
+            });
+            const hash = journal ? journal.hash(canonical) : null;
+            if (hash) {
+                // The answer of the same question is already known — it was paid for in an
+                // earlier phase of the run.
+                const cached = await journal.read(hash);
+                if (cached) {
+                    if (cached.kind === 'error') {
+                        throw new ApiError(cached.value, {
+                            code: 'BATCH_REQUEST_FAILED',
+                            details: { hash },
+                        });
+                    }
+                    announce({ type: 'journal.hit', hash });
+                    return cached.value;
+                }
+            }
+            if (batchMode && batchable && !noBatch && index === 0) {
+                return await ensureBatcher().add({
+                    model: candidate,
+                    body: canonical,
+                    hash,
+                    params: {
+                        model: candidate, instructions, input, parts, tools, schema, schemaName,
+                        strict, effort, summary, mode, maxOutputTokens, temperature, store,
+                        truncation, verbosity, stream, signal: callSignal, onEvent: callEvent,
+                        previousResponseId, toolChoice, parallelToolCalls,
+                    },
+                });
+            }
             try {
-                return await responsesCreateWith({
+                const answer = await responsesCreateWith({
                     model: candidate,
                     instructions, input, parts, tools, schema, schemaName, strict, effort, summary, mode,
                     maxOutputTokens, temperature, store, truncation, verbosity, stream,
                     signal: callSignal, onEvent: callEvent, previousResponseId, toolChoice, parallelToolCalls,
                 });
+                if (hash) await journal.writeJson(hash, answer);
+                return answer;
             } catch (error) {
                 lastError = error;
                 const next = candidates[index + 1];
@@ -586,6 +840,25 @@ export async function createClient({ config, env = process.env, signal = null, o
         },
 
         /**
+         * The batch route: two phases, two runs.
+         *
+         * The first phase submits the requests of a parallel round as one batch; the second phase
+         * takes the answers of the submitted batches into the journal and lets the run go on.
+         */
+        batches: {
+            /** The mode of this client: `off`, `submit` or `fetch`. */
+            mode: batch?.mode ?? 'off',
+            /** Is the batch route in use at all? */
+            enabled: batchMode,
+            /** The hosts that serve the batch route. */
+            hosts: () => batchHosts().map((backend) => backend.baseURL),
+            /** The second phase: take the answers of the submitted batches into the journal. */
+            fetch: async (options = {}) => await fetchBatches(options),
+            /** The queue of the requests of a parallel round; it is empty when the run is over. */
+            pending: () => batcher?.size() ?? 0,
+        },
+
+        /**
          * The Chat Completions API, for hosts that serve only that route.
          */
         chat: {
@@ -662,16 +935,46 @@ export async function createClient({ config, env = process.env, signal = null, o
                 const chain = fallbackChain(config, wanted);
                 let lastError = null;
                 for (const [index, candidate] of chain.entries()) {
+                    const fields = imageSizeFields({ size, model: candidate, format, quality });
+                    const bg = backgroundValue({ model: candidate, format, background });
+                    const form = {
+                        model: candidate,
+                        prompt,
+                        ...fields,
+                        ...(n ? { n: String(n) } : {}),
+                        ...(bg ? { background: bg } : {}),
+                    };
+                    // The name of the edit: the same fragment under the same instruction is the
+                    // same edit, and an edit that is paid for twice is an edit that costs twice.
+                    const key = journal ? journal.hash({
+                        kind: 'images.edit',
+                        model: candidate,
+                        prompt,
+                        fields,
+                        background: bg,
+                        n: n ?? null,
+                        image: journal.hashBytes(image?.bytes ?? Buffer.alloc(0)),
+                        mask: mask?.bytes ? journal.hashBytes(mask.bytes) : null,
+                    }) : null;
+                    if (key) {
+                        const cached = await journal.read(key);
+                        if (cached?.kind === 'bytes') {
+                            const bytes = cached.value;
+                            announce({ type: 'journal.hit', hash: key });
+                            return {
+                                images: [{ bytes, mime: sniffImage(bytes).mime }],
+                                raw: null,
+                                model: candidate,
+                            };
+                        }
+                        if (cached?.kind === 'error') {
+                            throw new ApiError(cached.value, {
+                                code: 'BATCH_REQUEST_FAILED',
+                                details: { hash: key },
+                            });
+                        }
+                    }
                     try {
-                        const fields = imageSizeFields({ size, model: candidate, format, quality });
-                        const bg = backgroundValue({ model: candidate, format, background });
-                        const form = {
-                            model: candidate,
-                            prompt,
-                            ...fields,
-                            ...(n ? { n: String(n) } : {}),
-                            ...(bg ? { background: bg } : {}),
-                        };
                         const files = [{
                             field: 'image',
                             filename: image?.filename ?? 'image.png',
@@ -690,7 +993,9 @@ export async function createClient({ config, env = process.env, signal = null, o
                         const answer = await call('images/edits', {
                             method: 'POST', rawBody, contentType, kind: 'images', model: candidate, signal: callSignal, supports: 'images',
                         });
-                        return { images: await imageBytes(answer, callSignal), raw: answer, model: candidate };
+                        const images = await imageBytes(answer, callSignal);
+                        if (key && images[0]?.bytes) await journal.writeBytes(key, images[0].bytes);
+                        return { images, raw: answer, model: candidate };
                     } catch (error) {
                         lastError = error;
                         const next = chain[index + 1];

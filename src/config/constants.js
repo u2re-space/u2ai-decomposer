@@ -19,7 +19,7 @@ export const ENUMS = Object.freeze({
   contextLevels: Object.freeze({ small: 16 * KiB, normal: 96 * KiB, large: 512 * KiB, max: 8 * MiB }),
   contextWords: Object.freeze(['auto', 'small', 'normal', 'large', 'max']),
   /** Backend entries may declare which API routes the host serves. */
-  backendRoutes: Object.freeze(['responses', 'chat', 'images']),
+  backendRoutes: Object.freeze(['responses', 'chat', 'images', 'batch']),
   imageFormats: Object.freeze(['png', 'jpeg', 'webp']),
   imageQualities: Object.freeze(['low', 'medium', 'high', 'auto']),
   imageSizes: Object.freeze(['1024x1024', '1536x1024', '1024x1536', 'auto']),
@@ -44,6 +44,7 @@ export const SUPPORT_ALIASES = Object.freeze({
   responseapi: 'responses', responses: 'responses',
   chatapi: 'chat', chat: 'chat', chatcompletions: 'chat', completions: 'chat',
   imageapi: 'images', images: 'images',
+  batchapi: 'batch', batches: 'batch',
 });
 
 /** RFC 7230 token characters for header names in backend entries. */
