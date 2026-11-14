@@ -103,6 +103,7 @@ export function pickPatches(patches = [], {
             kind: String(raw?.kind ?? '').trim(),
             x: Number(raw?.x), y: Number(raw?.y),
             width: Number(raw?.width), height: Number(raw?.height),
+            source: String(raw?.source ?? '').trim() || 'screen',
             finding: String(raw?.finding ?? '').trim(),
             prompt: String(raw?.prompt ?? '').trim(),
         };

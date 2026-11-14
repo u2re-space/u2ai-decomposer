@@ -183,9 +183,10 @@ export function solveHomography(src, dst) {
  * @param {number} x
  * @param {number} y
  * @returns {{ x: number, y: number }}
+ * @exports
  * @ai.hint pure
  */
-function applyHomography(h, x, y) {
+export function applyHomography(h, x, y) {
     const w = h[2][0] * x + h[2][1] * y + h[2][2];
     if (!w) return { x: Number.NaN, y: Number.NaN };
     return {

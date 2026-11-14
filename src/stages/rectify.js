@@ -995,6 +995,9 @@ export async function runRectify(state, notify = () => {}) {
                     confidence: resultSkew?.confidence ?? null,
                     frame: await rasterInfo(finalAbs, { cwd: root, engine }).catch(() => null),
                     assessment: result.data.assessment ?? '',
+                    // The corners the screen was cut by: the ai-mode maps a region of the screen
+                    // back onto the reference with them.
+                    quad: entry.quad ?? null,
                 };
                 state.reason = '';
                 notify({
@@ -1028,6 +1031,7 @@ export async function runRectify(state, notify = () => {}) {
                 after: state.best.angle,
                 confidence: state.best.confidence,
                 assessment: state.best.assessment,
+                quad: state.best.quad ?? null,
             });
             keptFiles.add(path.resolve(root, state.best.rel));
         }

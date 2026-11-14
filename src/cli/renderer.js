@@ -244,6 +244,13 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'rectify.file':
                 console.log(`  rectified: ${e.file}${e.screen ? ` (${e.screen})` : ''}`);
                 break;
+            case 'rectify.repair.start':
+                console.log(`  repairing: ${e.file} — pass ${e.pass ?? 1}`
+                    + `${e.patches ? `, ${e.patches} region(s)` : ''}`);
+                break;
+            case 'rectify.repair.file':
+                console.log(`  repaired: ${e.file} (${e.patches ?? 0} region(s))`);
+                break;
             case 'reconstruct.file':
                 if (verbose) console.log(`  restored: ${e.file}`);
                 break;
@@ -537,6 +544,13 @@ export function createRenderer({ verbose = false } = {}) {
                 break;
             case 'rectify.file':
                 say(paint(`  rectified: ${e.file}${e.screen ? ` (${e.screen})` : ''}`, COLORS.dim));
+                break;
+            case 'rectify.repair.start':
+                say(paint(`  repairing: ${e.file} — pass ${e.pass ?? 1}`
+                    + `${e.patches ? `, ${e.patches} region(s)` : ''}`, COLORS.dim));
+                break;
+            case 'rectify.repair.file':
+                say(paint(`  repaired: ${e.file} (${e.patches ?? 0} region(s))`, COLORS.dim));
                 break;
             case 'reconstruct.file':
                 if (verbose) say(`  restored: ${e.file}`);

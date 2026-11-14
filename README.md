@@ -222,7 +222,12 @@ where it belongs: it names the four corners of every screen and the harness proj
    screens, it only gives the geometry a better picture to cut.
 3. **What is still broken is repaired by fragments.** The broken parts of a screen are named, cut
    out, sent to the editor one by one and stitched back into exactly their boxes; a repair that is
-   not better than the picture it replaces is refused, and the screen keeps the bytes it had.
+   not better than the picture it replaces is refused, and the screen keeps the bytes it had. For
+   every region the role says where the pixels come from: the **screen** itself, or the
+   **reference** — a region of the reference is found through the same homography the screen was
+   cut by, so a piece that the geometry mangled can be taken from the original picture instead of
+   from the cut. The repaired screens live in `decomposition/repaired/`; the result of the geometry
+   stays where it is, and the run points at the repaired file.
 4. **The content of the neighbours is removed in the same stage.** The pieces of the neighbouring
    screens that came along with the cut are cleaned up here, so the separate `overlap` stage does
    not pay for the same work twice.

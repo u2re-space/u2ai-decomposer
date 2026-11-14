@@ -2,7 +2,7 @@
  * @file src/agent/schemas.js
  * @module agent/schemas
  * @purpose JSON schemas for AI role responses: decomposer, extender, rectifier, restorer.
- * @exports SUB_REFERENCE_KINDS, DECOMPOSER_KINDS, DECOMPOSER_SCHEMA, DECOMPOSER_INLINE_SCHEMA, EXTEND_SCHEMA, RECTIFY_SCHEMA, RECTIFY_REVIEW_SCHEMA, RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA
+ * @exports SUB_REFERENCE_KINDS, DECOMPOSER_KINDS, DECOMPOSER_SCHEMA, DECOMPOSER_INLINE_SCHEMA, EXTEND_SCHEMA, RECTIFY_SCHEMA, RECTIFY_REVIEW_SCHEMA, RECTIFY_REPAIR_SCHEMA, RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA
  * @ai.tags schema
  * @ai.hint keep
  * @ai.hint legacy-0.2
@@ -222,6 +222,33 @@ export const RESTORE_SCHEMA = object({
 export const RESTORE_VERIFY_SCHEMA = object({
     verdict: { type: 'string', enum: ['better', 'same', 'worse'], description: 'better=defect gone, worse=anything else changed.' },
     reason: { ...string, description: 'One sentence naming what changed.' },
+});
+
+/**
+ * The answer of the repairer of the ai-mode: the broken regions of a screen, and where the pixels
+ * of every repair come from — the screen itself or the reference it was cut from.
+ */
+export const RECTIFY_REPAIR_SCHEMA = object({
+    verdict: { type: 'string', enum: ['clean', 'repair'], description: 'clean=the screen is whole, repair=the pixels need fixes.' },
+    assessment: { ...string, description: 'What you see and why.' },
+    patches: {
+        type: 'array',
+        description: 'Regions to repair, in the pixels of the screen.',
+        items: object({
+            kind: { type: 'string', enum: RESTORE_DEFECT_KINDS, description: 'Type of defect.' },
+            x: { type: 'integer', description: 'Left edge in pixels of the screen.' },
+            y: { type: 'integer', description: 'Top edge in pixels of the screen.' },
+            width: { type: 'integer', description: 'Width of the region.' },
+            height: { type: 'integer', description: 'Height of the region.' },
+            source: {
+                type: 'string',
+                enum: ['screen', 'reference'],
+                description: 'screen=the fragment is cut from the screen itself, reference=from the same region of the reference.',
+            },
+            finding: { ...string, description: 'What is wrong, stated as an observed fact.' },
+            prompt: { ...string, description: 'Instruction for the image editor.' },
+        }),
+    },
 });
 
 /**

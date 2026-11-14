@@ -11,8 +11,8 @@
  *   repair is kept.
  *
  * @depends node:fs/promises, openai/images, openai/responses, roles/index
- * @usedBy stages/reconstruct, stages/overlap
- * @exports editFragment, verifyRepair
+ * @usedBy stages/reconstruct, stages/overlap, stages/rectify-ai
+ * @exports editFragment, verifyRepair, prefersStartPicture
  * @ai.tags restoration, editor, verification
  * @ai.hint io
  */
@@ -22,6 +22,25 @@ import { RESTORE_VERIFY_SCHEMA } from '../agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 import { sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
+
+/**
+ * Does the editor have to work on the picture the stage started with?
+ *
+ * The `gpt-image` line redraws what it is given: a fragment that already carries the pixels of an
+ * earlier repair is a fragment it will happily redraw, and the new answer then fights the repair
+ * that is already there. So for that line the fragment is cut from the picture the stage started
+ * with, and the answer is stitched into the working file.
+ *
+ * The `seedream` line keeps the pixels it is given, so it may work on the repaired result: that is
+ * the better source when a pass continues the work of the one before it.
+ * @param {string|null} model the model of the editor
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function prefersStartPicture(model) {
+    return /gpt-image-2\.6/i.test(String(model ?? ''));
+}
 
 /**
  * Send one fragment to the image editor and wait for an answer.

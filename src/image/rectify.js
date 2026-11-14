@@ -22,6 +22,7 @@ export {
     quadToRect,
     solveQuadError,
     solveHomography,
+    applyHomography,
     CORNER_ORDER,
 } from './distort.js';
 

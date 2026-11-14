@@ -54,7 +54,9 @@ import { imageModelFor, sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
 import { BATCH_SUBMITTED } from '../openai/batch.js';
 import { FRAGMENT_MARGIN, editorPrompt, pickPatches, planFragment } from './restore-plan.js';
-import { editFragment, verifyRepair } from './repair.js';
+import { editFragment, verifyRepair, prefersStartPicture } from './repair.js';
+
+export { prefersStartPicture };
 
 /** Directory under the work directory where the repaired copies are written. */
 export const RESTORED_DIR = 'restored';
@@ -180,25 +182,6 @@ function readGeometry(raw, limits) {
         }
     }
     return result;
-}
-
-/**
- * Does the editor have to work on the picture the stage started with?
- *
- * The `gpt-image` line redraws what it is given: a fragment that already carries the pixels of an
- * earlier repair is a fragment it will happily redraw, and the new answer then fights the repair
- * that is already there. So for that line the fragment is cut from the picture the stage started
- * with — the rectified result — and the answer is stitched into the working file.
- *
- * The `seedream` line keeps the pixels it is given, so it may work on the repaired result: that is
- * the better source when a pass continues the work of the one before it.
- * @param {string|null} model the model of the editor
- * @returns {boolean}
- * @exports
- * @ai.hint pure
- */
-export function prefersStartPicture(model) {
-    return /gpt-image-2\.6/i.test(String(model ?? ''));
 }
 
 /**
