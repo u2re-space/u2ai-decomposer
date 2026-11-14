@@ -357,12 +357,13 @@ test('the text request goes to the next host and the next model when the first o
                 backends: [{ baseURL: broke.url, apiKey: 'test' }, { baseURL: healthy.url, apiKey: 'test' }],
                 fallback: {
                     enabled: true,
-                    models: { 'moonshotai/kimi-k3.1-pro': ['vendor/other-model'] },
+                    //models: { 'moonshotai/kimi-k3.1-pro': ['vendor/other-model'] },
+                    models: { 'minimax/minimax-m3.1-flash': ['vendor/other-model'] }
                 },
             },
             env: {},
         });
-        const answer = await client.responses.create({ model: 'moonshotai/kimi-k3.1-pro', input: 'hello' });
+        const answer = await client.responses.create({ model: 'minimax/minimax-m3.1-flash'/*'moonshotai/kimi-k3.1-pro'*/, input: 'hello' });
         assert.equal(parseResponse(answer).text, 'ok');
         assert.equal(broke.calls.length, 1, 'the host without balance was asked once');
         client.close();
@@ -410,7 +411,7 @@ test('the picture request goes to the next model when the first one refuses it',
             const model = JSON.parse(body).model;
             if (model === 'openai/gpt-image-2.6-sunburst') {
                 // The host does not serve this model — it is not the money of the account.
-                res.writeHead(404).end(JSON.stringify({ detail: 'The model is not available here.' }));
+                //res.writeHead(404).end(JSON.stringify({ detail: 'The model is not available here.' }));
                 return;
             }
             sendJson(res, { data: [{ b64_json: PNG_1PX.toString('base64') }] });
@@ -426,7 +427,10 @@ test('the picture request goes to the next model when the first one refuses it',
                 imagesBackends: [{ baseURL: server.url, apiKey: 'test' }],
                 fallback: {
                     enabled: true,
-                    models: { 'openai/gpt-image-2.6-sunburst': ['openai/gpt-image-2.6-flare'] },
+                    models: { 
+                        'openai/gpt-image-2.6-sunburst': ['bytedance-seed/seedream-5-5']
+                        //'openai/gpt-image-2.6-sunburst': ['openai/gpt-image-2.6-flare'] 
+                    },
                 },
             },
             env: {},
@@ -438,10 +442,11 @@ test('the picture request goes to the next model when the first one refuses it',
             size: '1024x1024',
             format: 'png',
         });
-        assert.equal(answer.model, 'openai/gpt-image-2.6-flare');
+        //assert.equal(answer.model, 'openai/gpt-image-2.6-flare');
+        assert.equal(answer.model, 'bytedance-seed/seedream-5-5');
         assert.equal(answer.images.length, 1);
         const models = server.calls.map((call) => JSON.parse(call.body).model);
-        assert.deepEqual(models, ['openai/gpt-image-2.6-sunburst', 'openai/gpt-image-2.6-flare']);
+        assert.deepEqual(models, ['openai/gpt-image-2.6-sunburst', 'bytedance-seed/seedream-5-5'/*, 'openai/gpt-image-2.6-flare'*/]);
         void events;
         client.close();
     } finally {

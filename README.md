@@ -143,8 +143,9 @@ When every host refuses the model — no balance, no route — the request goes 
   "fallback": {
     "enabled": true,
     "models": {
-      "openai/gpt-image-2.6-sunburst": ["openai/gpt-image-2.6-flare"],
-      "moonshotai/kimi-k3.1-pro": ["vendor/other-model"]
+      "openai/gpt-image-2.6-sunburst": ["bytedance-seed/seedream-5-5"],
+      "moonshotai/kimi-k3.1-pro": ["minimax/minimax-m3.1-flash"],
+      "minimax/minimax-m3.1-flash": []
     }
   }
 }

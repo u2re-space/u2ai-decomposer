@@ -11,7 +11,7 @@ import { ENUMS } from './constants.js';
 export const defaults = {
   // --- API -----------------------------------------------------------------
   /** Text model for the role agents. */
-  model: 'moonshotai/kimi-k3.1-pro',
+  model: 'minimax/minimax-m3.1-flash',//'moonshotai/kimi-k3.1-pro',
   /** Picture model for generate/edit tools and the reconstruct stage. */
   imageModel: 'openai/gpt-image-2.6-sunburst',
   /** Endpoint of both APIs; backends[] below can override it per route. */
@@ -73,7 +73,9 @@ export const defaults = {
   fallback: {
     enabled: true,
     models: {
-      'openai/gpt-image-2.6-sunburst': ['openai/gpt-image-2.6-flare'],
+      'openai/gpt-image-2.6-sunburst': ['bytedance-seed/seedream-5-5'],
+      "moonshotai/kimi-k3.1-pro": ["minimax/minimax-m3.1-flash"],
+      "minimax/minimax-m3.1-flash": []
     },
   },
 

@@ -14,6 +14,7 @@ import { ENUMS } from '../config/constants.js';
 
 /** Built-in model profiles. A ceiling of `null` means "no built-in limit". */
 export const MODEL_PROFILES = Object.freeze({
+    'minimax/minimax-m3.1-flash': { window: 8_388_608, maxOutput: 65_536, ceiling: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'] },
     'moonshotai/kimi-k3.1-pro': { window: 8_388_608, maxOutput: 65_536, ceiling: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'] },
     'openai/gpt-6.1-sol': { window: 4_194_304, maxOutput: 32_768, ceiling: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'] },
     'openai/gpt-6.1-terra': { window: 2_097_152, maxOutput: 16_384, ceiling: 'high', efforts: ['low', 'medium', 'high'] },
