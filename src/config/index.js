@@ -97,7 +97,7 @@ export function redactConfig(config) {
   const short = (value) => (typeof value === 'string' && value.length > 6 ? `${value.slice(0, 3)}…${value.slice(-2)}` : value ? '…' : null);
   const out = structuredClone(config);
   if (out.apiKey) out.apiKey = short(out.apiKey);
-  for (const branch of ['backends', 'imagesBackends']) {
+  for (const branch of ['backends', 'imagesBackends', 'layerBackends']) {
     if (Array.isArray(out[branch])) {
       for (const item of out[branch]) if (item && typeof item === 'object' && item.apiKey) item.apiKey = short(item.apiKey);
     }

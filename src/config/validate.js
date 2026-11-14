@@ -138,6 +138,9 @@ function validateStage(id, section, fail) {
     if ('layerSize' in section && !ENUMS.seedreamLayerSizes.includes(section.layerSize)) {
       fail(`${where}.layerSize: ${ENUMS.seedreamLayerSizes.join(' | ')}`);
     }
+    if ('layerModel' in section && section.layerModel != null && typeof section.layerModel !== 'string') {
+      fail(`${where}.layerModel: строка или null`);
+    }
     if ('textRecognition' in section && typeof section.textRecognition !== 'boolean') {
       fail(`${where}.textRecognition: true | false`);
     }
@@ -190,6 +193,7 @@ export function validateConfig(config) {
 
   validateBackendList(c.backends, 'backends', fail);
   validateBackendList(c.imagesBackends, 'imagesBackends', fail);
+  validateBackendList(c.layerBackends, 'layerBackends', fail);
   validateModelBackends(c.modelsBackends, fail);
   if (!isRecord(c.fallback)) fail('fallback должен быть объектом');
   if (typeof c.fallback.enabled !== 'boolean') fail('fallback.enabled: true | false');

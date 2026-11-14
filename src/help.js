@@ -61,6 +61,10 @@ Config:
   The picture hosts of imagesBackends are tried one by one; when all of them
   refuse the model, the next model of fallback.models gets the request.
   A host that refuses for the lack of money is remembered and skipped.
+  The layer split is a route of its own: layerBackends names the hosts that
+  serve seedream-5.5 (APIMart by default, key in APIMART_API_KEY), and
+  stages.resolve.layerModel names the model. Without a key the text role
+  splits the screen instead.
 
 Examples:
   ai-decompose -i screenshot.png

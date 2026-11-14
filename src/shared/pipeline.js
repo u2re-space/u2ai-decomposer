@@ -98,6 +98,10 @@ export async function runPipeline({
                     label: stage.label,
                     model: role.model,
                     imageModel: role.imageModel ?? imageModel ?? config?.imageModel ?? null,
+                    // The layer split is a route of its own: its model is worth showing.
+                    layerModel: (advanced && stage.id === 'resolve')
+                        ? (config?.stages?.resolve?.layerModel ?? null)
+                        : null,
                 };
             }),
             outputs,

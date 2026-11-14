@@ -126,7 +126,8 @@ cut at the top and at the bottom becomes 1024×1024.
 ### Falling back when a host refuses
 
 Every request walks the hosts of its route — `backends` for a text answer, `imagesBackends` for
-a picture — and every host that refuses gives the request to the next one. A host that refuses
+a picture, `layerBackends` for the layer split — and every host that refuses gives the request
+to the next one. A host that refuses
 because it has **no money** (`402`, `Insufficient balance`, `insufficient_quota`) is remembered
 for the rest of the run and is not asked again: the next host takes the request and the run says
 so:
@@ -260,8 +261,8 @@ split is slow or fails.
 
 `--advanced` splits one screen into layers. There are two sources:
 
-- `seedream` — the image model (`seedream-5-5`) splits the screen itself and answers with a base
-  picture and transparent PNG layers, each with a bounding box. The base is written to
+- `seedream` — the model of the layer route (`seedream-5-5`) splits the screen itself and answers
+  with a base picture and transparent PNG layers, each with a bounding box. The base is written to
   `layers/00-base.png` and every layer to `layers/NN-<name>.png`. The model scales every layer on
   its own to the chosen tier, so the file of a layer is not the frame of its box: each file is
   brought to `w × h` of its box before it is written, and the box says where the layer belongs —
@@ -269,15 +270,42 @@ split is slow or fails.
 - `director` — the text role names the layers with a box and the harness cuts those boxes out of
   the pixels of the screen.
 
-`auto` (the default) picks `seedream` when the configured image model is a seedream one and
-`director` otherwise.
+`auto` (the default) picks `seedream` when the layer route can answer — its model is a seedream
+one and a host of the route has a key — and `director` otherwise.
+
+#### The layer route: APIMart
+
+The layer split is a route of its own: the host that serves `seedream-5-5` is not the host that
+repairs a picture, and the picture hosts do not know the model. The route is listed in
+`layerBackends`, and the key is read from the environment variable the entry names:
+
+```json
+{
+  "layerBackends": [
+    { "baseURL": "https://api.apimart.ai/v1", "env": "APIMART_API_KEY" }
+  ]
+}
+```
+
+```
+set APIMART_API_KEY=…
+ai-decompose -i screen.png --advanced
+```
+
+The request is `POST https://api.apimart.ai/v1/images/generations` with
+`layer_decomposition: true` and exactly one input image; the answer is a task, and the task is
+polled on the same host (`GET /v1/tasks/{task_id}`) until it is `completed`. The layers come back
+as transparent PNGs with a bounding box in the coordinates of the base picture.
+
+Without the key the run does not fail: the text role splits the screen instead, and the run says
+so (`no host of the layer route has a key — the text role splits the screen instead`).
 
 ### Config
 
 - File: `~/.ai-decompose/config.json`
 - Env prefix: `AI_DECOMPOSE_`
 - Substitutions: `{{env:NAME}}`
-- Backends and imagesBackends pools
+- Backends, imagesBackends and layerBackends pools
 - fallback.models: the models that get a picture request when every host refused the model
 
 The section of the resolve stage:
@@ -287,6 +315,7 @@ The section of the resolve stage:
 | `layers` | Emit `layers/` next to `decomposition.json` |
 | `maxLayers` | How many layers of one screen are kept |
 | `layerSource` | `auto` \| `seedream` \| `director` |
+| `layerModel` | The model of the layer route: `seedream-5-5` |
 | `layerSize` | The tier of the seedream decomposition: `auto` \| `1K` \| `1.5K` \| `2K` |
 | `textRecognition` | Ask the model for the OCR of the text layers |
 | `layerPrompt` | The prompt of the decomposition (the tight-box wording by default; `""` sends no prompt) |

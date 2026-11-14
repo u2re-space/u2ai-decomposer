@@ -11,10 +11,12 @@
  *   decomposition that names a picture nobody can open is not a decomposition.
  *
  *   The layer split is the advanced part, and it has two sources:
- *     - `seedream`: the image model splits the screen itself and answers with a base picture and
- *       transparent PNG layers, each with a bounding box in the coordinates of the base. The file
- *       of a layer is scaled on its own by the model, so it is brought to `w × h` of its box before
- *       it is written — the pixels of the file are not the coordinates of the base;
+ *     - `seedream`: the model of the layer route (seedream-5.5) splits the screen itself and answers
+ *       with a base picture and transparent PNG layers, each with a bounding box in the coordinates
+ *       of the base. The file of a layer is scaled on its own by the model, so it is brought to
+ *       `w × h` of its box before it is written — the pixels of the file are not the coordinates of
+ *       the base. The route is a route of its own: the host that serves that model is not the host
+ *       that repairs a picture, and its key is its own (`APIMART_API_KEY` by default);
  *     - `director`: the text role names the layers with a box and the harness cuts those boxes out
  *       of the pixels of the screen.
  *
@@ -24,7 +26,8 @@
  * @depends node:path, node:fs/promises, agent/schemas, agent/paths, agent/tool-specs,
  *   image/raster, image/sizing, openai/images, openai/responses, openai/seedream, roles/index
  * @usedBy shared/pipeline
- * @exports runResolve, LAYERS_DIR, DECOMPOSITION_FILE, DIRECTOR_TOOLS, resolveLayerSource
+ * @exports runResolve, LAYERS_DIR, DECOMPOSITION_FILE, DIRECTOR_TOOLS, resolveLayerSource,
+ *   resolveLayerModel
  * @ai.tags decomposition, output, layers
  * @ai.hint keep
  */
@@ -172,20 +175,41 @@ export function clampBox(box, frame) {
 }
 
 /**
+ * The model of the layer route: the one that splits a screen into layers.
+ *
+ * The layer split has a model of its own — it is not the picture model of the repairs. The
+ * config names it (`stages.resolve.layerModel`); without a name the picture model is asked, and
+ * without one of those the seedream route is the answer.
+ * @param {{ config?: object, imageModel?: string|null }} params
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function resolveLayerModel({ config = null, imageModel = null } = {}) {
+    const asked = config?.stages?.resolve?.layerModel;
+    if (typeof asked === 'string' && asked.trim()) return asked.trim();
+    if (typeof imageModel === 'string' && imageModel.trim()) return imageModel.trim();
+    return SEEDREAM_MODEL;
+}
+
+/**
  * Where the layers of the advanced mode come from.
  *
- * `auto` asks the image model when it is a seedream model — the only one that splits a picture
- * into layers itself — and falls back to the text role otherwise. The choice can be forced with
+ * `auto` asks the layer route when it can answer — the model of that route is a seedream one
+ * (the only one that splits a picture into layers itself) and a host of the route has a key —
+ * and falls back to the text role otherwise. The choice can be forced with
  * `stages.resolve.layerSource`.
- * @param {{ config?: object, imageModel?: string|null }} params
+ * @param {{ config?: object, imageModel?: string|null, channels?: Array<unknown>|null }} params
  * @returns {'seedream'|'director'}
  * @exports
  * @ai.hint pure
  */
-export function resolveLayerSource({ config = null, imageModel = null } = {}) {
+export function resolveLayerSource({ config = null, imageModel = null, channels = null } = {}) {
     const asked = String(config?.stages?.resolve?.layerSource ?? 'auto').trim().toLowerCase();
     if (asked === 'seedream' || asked === 'director') return asked;
-    return isSeedream55(imageModel) ? 'seedream' : 'director';
+    if (!isSeedream55(resolveLayerModel({ config, imageModel }))) return 'director';
+    // Without a host of the layer route the split cannot run: the text role answers instead.
+    return Array.isArray(channels) && !channels.length ? 'director' : 'seedream';
 }
 
 /**
@@ -339,9 +363,17 @@ export async function runResolve(state, notify = () => {}) {
  */
 async function splitLayers({ root, outDir, target, config, roles, model, effort, toolset, engine, warnings,
     client = null, imageModel = null, notify = () => {} }) {
-    const source = resolveLayerSource({ config, imageModel });
+    // The layer route is a route of its own: the host that serves seedream-5.5 is not the host
+    // that repairs a picture, and the key of that host is a key of its own.
+    const layerModel = resolveLayerModel({ config, imageModel });
+    const channels = typeof client?.channels === 'function' ? client.channels('layers', layerModel) : [];
+    const source = resolveLayerSource({ config, imageModel, channels });
     if (source === 'seedream') {
-        return await splitLayersWithSeedream({ root, outDir, target, config, client, imageModel, engine, warnings, notify });
+        return await splitLayersWithSeedream({ root, outDir, target, config, channels, model: layerModel, engine, warnings, notify });
+    }
+    if (isSeedream55(layerModel)) {
+        // The route of the layers is up, but no host of it has a key: the text role answers.
+        warnings.push('resolve: no host of the layer route has a key — the text role splits the screen instead');
     }
     return await splitLayersWithDirector({ root, outDir, target, config, roles, model, effort, toolset, engine, warnings });
 }
@@ -355,12 +387,12 @@ async function splitLayers({ root, outDir, target, config, roles, model, effort,
  * the file size may differ from the bounding_box. When assembling, bring the layer to `w × h` and
  * place it at `(x, y)`." A layer written as it came would carry the size of its own canvas and the
  * box would say something else, and the two would not agree on the picture.
- * @param {{ root: string, outDir: string, target: string, config: object, client: object|null,
- *   imageModel: string|null, engine: string, warnings: string[], notify?: Function }} params
+ * @param {{ root: string, outDir: string, target: string, config: object, channels: object[],
+ *   model: string, engine: string, warnings: string[], notify?: Function }} params
  * @returns {Promise<{ layers: object[], frame: object|null, base: object|null }>}
  * @ai.hint io
  */
-async function splitLayersWithSeedream({ root, outDir, target, config, client, imageModel, engine, warnings, notify = () => {} }) {
+async function splitLayersWithSeedream({ root, outDir, target, config, channels, model, engine, warnings, notify = () => {} }) {
     const abs = path.resolve(root, target);
     const bytes = await readFile(abs).catch(() => null);
     if (!bytes) {
@@ -383,10 +415,8 @@ async function splitLayersWithSeedream({ root, outDir, target, config, client, i
         return { layers: [], frame: null, base: null };
     }
 
-    const model = imageModel || config?.imageModel || SEEDREAM_MODEL;
-    const channels = typeof client?.channels === 'function' ? client.channels('images', model) : [];
     if (!channels.length) {
-        warnings.push('resolve: no image backend is configured for the seedream layer split');
+        warnings.push('resolve: no host of the layer route is configured for the seedream layer split');
         return { layers: [], frame: null, base: null };
     }
 

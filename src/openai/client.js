@@ -119,18 +119,19 @@ function keyOf(entry, env) {
 /**
  * The ordered backends of one route kind.
  *
- * `images` uses `imagesBackends` (and falls back to `backends`), `text` uses `backends`.
+ * `images` uses `imagesBackends` (and falls back to `backends`), `text` uses `backends`, and
+ * `layers` uses `layerBackends` — the host that splits a screen into layers is a different one.
  * A per-model list in `modelsBackends` wins over the general one: a model is often served
  * by a host that the general list does not know about.
  * @param {object} config
- * @param {{ kind?: 'text'|'images', model?: string|null, env?: object }} [options]
+ * @param {{ kind?: 'text'|'images'|'layers', model?: string|null, env?: object }} [options]
  * @returns {Array<{ baseURL: string, apiKey: string|null, headers: object, body: object, supports: object }>}
  * @exports
  */
 export function resolveBackends(config, { kind = 'text', model = null, env = process.env } = {}) {
     const general = kind === 'images'
         ? (Array.isArray(config?.imagesBackends) && config.imagesBackends.length ? config.imagesBackends : config?.backends)
-        : config?.backends;
+        : (kind === 'layers' ? config?.layerBackends : config?.backends);
     const perModel = model ? config?.modelsBackends?.[model] : null;
     const entries = Array.isArray(perModel) && perModel.length ? perModel : (Array.isArray(general) ? general : []);
 
@@ -147,6 +148,9 @@ export function resolveBackends(config, { kind = 'text', model = null, env = pro
             supports: isRecord(entry.supports) ? { ...entry.supports } : {},
         });
     }
+    // The layer route is served by one host and one model: a host without a key cannot answer,
+    // and the host of the text route does not know the model at all.
+    if (kind === 'layers') return chain.filter((item) => item.apiKey);
     if (chain.some((item) => item.apiKey)) return chain.filter((item) => item.apiKey);
 
     // No keyed backend: the primary URL and key of the config are the only option left.
@@ -721,7 +725,7 @@ export async function createClient({ config, env = process.env, signal = null, o
          *
          * A channel talks to one host and never rotates, which is what an asynchronous task
          * needs: the task id belongs to the host that created it, so the task is polled there.
-         * @param {'text'|'images'} kind
+         * @param {'text'|'images'|'layers'} kind
          * @param {string|null} model the model the request names; a per-model list wins
          * @returns {Array<{ label: string, baseURL: string, call: Function }>}
          */

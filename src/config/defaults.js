@@ -63,6 +63,16 @@ export const defaults = {
     { baseURL: 'https://sprutdock.ru/v1', env: 'SPRUTDOCK_API_KEY' },
     { baseURL: 'https://gptunnel.ru/v1', env: 'GPTUNNEL_API_KEY' },
   ],
+  /**
+   * Ordered hosts of the layer route — the host that splits a screen into layers.
+   *
+   * The layer split is a different model on a different host: only APIMart serves seedream-5.5,
+   * and the picture hosts above do not know it. The key is read from the environment variable
+   * named in `env`, so it never lands in the config file.
+   */
+  layerBackends: [
+    { baseURL: 'https://api.apimart.ai/v1', env: 'APIMART_API_KEY' },
+  ],
   /** Per-model host lists: { "<model>": [{ baseURL, apiKey?, prefix?, vendor?, suffix?, type? }] }. */
   modelsBackends: {},
   /**
@@ -227,6 +237,8 @@ export const defaults = {
       maxLayers: 32,
       /** Where the layers come from: auto | seedream | director. */
       layerSource: 'auto',
+      /** The model of the layer route: the one that splits a screen into layers. */
+      layerModel: 'seedream-5-5',
       /** The tier the seedream decomposition runs at: auto | 1K | 1.5K | 2K. */
       layerSize: 'auto',
       /** Ask the image model for the OCR of the text layers. */
@@ -290,6 +302,7 @@ export function defaultConfigText() {
     reasoning: { effort: 'xhigh', summary: 'auto' },
     backends: structuredClone(defaults.backends),
     imagesBackends: structuredClone(defaults.imagesBackends),
+    layerBackends: structuredClone(defaults.layerBackends),
     fallback: structuredClone(defaults.fallback),
     stages: { extend: { padFraction: 0.125 }, resolve: { layers: false } },
   };

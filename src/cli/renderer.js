@@ -59,7 +59,7 @@ function printPlan(event) {
     const images = Array.isArray(event.images) ? event.images : [];
     console.log(`  inputs: ${images.length ? images.join(', ') : '(none)'}`);
     for (const stage of event.stages ?? []) {
-        const models = [stage.model, stage.imageModel].filter(Boolean).join(', ');
+        const models = [stage.model, stage.imageModel, stage.layerModel].filter(Boolean).join(', ');
         console.log(`  ${stage.id}: ${stage.label}${models ? ` [${models}]` : ''}`);
     }
     for (const output of event.outputs ?? []) console.log(`  output: ${output}`);
