@@ -171,6 +171,24 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'request.skip':
                 console.log(`  the host ${e.backend} is skipped: ${e.reason}`);
                 break;
+            case 'batch.submit':
+                console.log(`[${stage || 'run'}] the batch ${e.id} is submitted: ${e.requests} request(s) to ${e.host}`);
+                break;
+            case 'batch.fetched':
+                console.log(`[${stage || 'run'}] the batch ${e.id} is done: ${e.answers ?? 0} answer(s)`);
+                break;
+            case 'batch.pending':
+                console.log(`[${stage || 'run'}] the batch ${e.id} is not ready yet (${e.status})`);
+                break;
+            case 'batch.poll':
+                console.log(`[${stage || 'run'}] the batch ${e.id}: ${e.status}`);
+                break;
+            case 'batch.missing':
+                console.warn(`  the host of the batch ${e.id} is not known (${e.host})`);
+                break;
+            case 'batch.failed':
+                console.warn(`  the batch did not work out (${e.error}) — the requests go one by one`);
+                break;
             case 'transport.fallback':
             case 'transport.adjust':
                 console.log(`  ${e.reason}`);
@@ -445,6 +463,24 @@ export function createRenderer({ verbose = false } = {}) {
                 break;
             case 'request.skip':
                 say(paint(`  · the host ${e.backend} is skipped: ${e.reason}`, COLORS.dim));
+                break;
+            case 'batch.submit':
+                say(paint(`  · the batch ${e.id} is submitted: ${e.requests} request(s) to ${e.host}`, COLORS.dim));
+                break;
+            case 'batch.fetched':
+                say(paint(`  · the batch ${e.id} is done: ${e.answers ?? 0} answer(s)`, COLORS.dim));
+                break;
+            case 'batch.pending':
+                say(paint(`  · the batch ${e.id} is not ready yet (${e.status})`, COLORS.yellow));
+                break;
+            case 'batch.poll':
+                say(paint(`  · the batch ${e.id}: ${e.status}`, COLORS.dim));
+                break;
+            case 'batch.missing':
+                say(paint(`  ⚠ the host of the batch ${e.id} is not known (${e.host})`, COLORS.yellow));
+                break;
+            case 'batch.failed':
+                say(paint(`  ⚠ the batch did not work out (${e.error}) — the requests go one by one`, COLORS.yellow));
                 break;
             case 'transport.fallback':
             case 'transport.adjust':

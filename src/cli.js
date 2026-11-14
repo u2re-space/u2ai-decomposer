@@ -10,8 +10,11 @@
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 import { loadConfig } from './config.js';
 import { createClient, resolveBackends } from './openai/client.js';
+import { createJournal } from './openai/journal.js';
+import { BATCH_SUBMITTED } from './openai/batch.js';
 import { createRenderer, createPlainRenderer, detectMode } from './cli/renderer.js';
 import { checkNodeVersion } from './cli/compatibility.js';
 import { HELP } from './help.js';
@@ -57,6 +60,8 @@ export function parseArgv(argv) {
             'dry-run': { type: 'boolean', default: false },
             'advanced': { type: 'boolean', default: false },
             'stop-after': { type: 'string' },
+            'batch': { type: 'boolean', default: false },
+            'batch-fetch': { type: 'boolean', default: false },
         },
         strict: false,
         allowPositionals: true,
@@ -85,6 +90,8 @@ export function parseArgv(argv) {
         dryRun: parsed.values['dry-run'] ?? false,
         advanced: parsed.values['advanced'] ?? false,
         stopAfter: parsed.values['stop-after'] ?? null,
+        batch: parsed.values.batch === true,
+        batchFetch: parsed.values['batch-fetch'] === true,
         positionals: parsed.positionals,
     };
 }
@@ -145,13 +152,53 @@ export async function main(argv = process.argv.slice(2)) {
     const renderer = isTTY
         ? createRenderer({ verbose: opts.verbose })
         : createPlainRenderer({ verbose: opts.verbose });
+
+    // The batch route is two-phase: the first run submits the requests of a parallel round and
+    // stops, the second one takes the answers and goes on. The journal is what the two phases
+    // share: the answer of a request is found by the hash of the request.
+    const batchMode = opts.batchFetch
+        ? 'fetch'
+        : (opts.batch || config.batch?.enabled === true ? 'submit' : 'off');
+    const journal = batchMode === 'off'
+        ? null
+        : createJournal({
+            dir: path.resolve(process.cwd(), opts.out, config.batch?.journalDir ?? 'decomposition/.batch'),
+        });
+    if (journal) await journal.init().catch(() => {});
+
     // The events of the transport go to the reader too: a retry or a host that fell out
     // is something the user has to know, not something to hide in a log.
     const client = await createClient({
         config,
         signal: null,
         onEvent: (event) => renderer.event(event),
+        batch: journal ? {
+            mode: batchMode,
+            journal,
+            collectMs: config.batch?.collectMs,
+            pollMs: config.batch?.pollMs,
+            waitMs: config.batch?.waitMs,
+            maxRequests: config.batch?.maxRequests,
+            window: config.batch?.window,
+            endpoint: config.batch?.endpoint,
+        } : null,
     });
+
+    if (journal && !client.batches.hosts().length) {
+        console.error('No host serves the batch route: put "supports": { "batch": true } into a backend '
+            + 'of the config, and give that backend a key.');
+        return 1;
+    }
+
+    // The second phase: the answers of the submitted batches go into the journal, and the run
+    // goes on with them.
+    if (journal && batchMode === 'fetch') {
+        const fetched = await client.batches.fetch();
+        if (!fetched.ready) {
+            console.error('The batch is not ready yet. Run the same command with --batch-fetch again later.');
+            return 3;
+        }
+    }
 
     try {
         const result = await runPipeline({
@@ -181,6 +228,13 @@ export async function main(argv = process.argv.slice(2)) {
         if (error?.name === 'AbortError') {
             console.error('Aborted.');
             return 130;
+        }
+        // The batch is out: the answers are not here yet, and the run waits for them.
+        if (error?.code === BATCH_SUBMITTED) {
+            const id = error?.details?.batchId ?? '';
+            console.error(`The batch ${id ? `${id} ` : ''}was submitted — the answers are not here yet. `
+                + 'Run the same command with --batch-fetch.');
+            return 2;
         }
         console.error(`Error: ${error.message || error}`);
         return 1;

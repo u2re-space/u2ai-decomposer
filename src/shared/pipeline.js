@@ -15,6 +15,7 @@ import { loadSkills } from '../agent/skills.js';
 import { connectMcpServers } from '../agent/mcp.js';
 import { STAGE_DEFS, STAGE_DIRS, STAGE_ROLES } from '../stages/index.js';
 import { DECOMPOSITION_FILE } from '../stages/resolve.js';
+import { BATCH_SUBMITTED } from '../openai/batch.js';
 import { saveStageManifest } from './manifest.js';
 import { resumeFromWorkDir } from './resume.js';
 
@@ -143,9 +144,13 @@ export async function runPipeline({
     // one: the stages before it are not repeated, they cost money and their answer is on disk.
     await resumeFromWorkDir(state, { stages: toRun.map((stage) => stage.id), notify });
 
-    const failed = await runStages(toRun, state, notify);
-
-    for (const connection of mcp) await connection.close().catch(() => {});
+    // A stage that stops the run — a submitted batch, for one — still closes what it opened.
+    let failed = false;
+    try {
+        failed = await runStages(toRun, state, notify);
+    } finally {
+        for (const connection of mcp) await connection.close().catch(() => {});
+    }
 
     return { output: state.decomposition, outputPath: state.outputPath ?? null, warnings: state.warnings, failed };
 }
@@ -170,6 +175,9 @@ export async function runStages(stages, state, notify = () => {}) {
             await stage.run(state, notify);
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
+            // The batch was submitted and the answers are not here yet: the run stops and waits
+            // for the second phase. It is not a failure of the stage.
+            if (error?.code === BATCH_SUBMITTED) throw error;
             state.warnings.push(`${stage.id}: ${error.message}`);
             failed = true;
             notify({ type: 'stage.error', stage: stage.id, error: error.message });

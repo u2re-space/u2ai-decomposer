@@ -52,6 +52,7 @@ import { applyGeometry } from '../image/geometry.js';
 import { defaults } from '../config/defaults.js';
 import { imageModelFor, sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
+import { BATCH_SUBMITTED } from '../openai/batch.js';
 import { FRAGMENT_MARGIN, editorPrompt, pickPatches, planFragment } from './restore-plan.js';
 import { editFragment, verifyRepair } from './repair.js';
 
@@ -201,6 +202,311 @@ export function prefersStartPicture(model) {
 }
 
 /**
+ * Work on one screen: ask the restorer, repair what it named, apply the geometry.
+ *
+ * Every screen of the stage is a file of its own, and the screens do not wait for each other:
+ * the plan of one screen does not depend on the plan of the next one. That is what makes the
+ * round of the calls a round — and a round of parallel calls is what the batch route is for.
+ *
+ * @param {{ file: object, index: number, root: string, workDir: string, client: object,
+ *   roles: object, model: string|null, effort: string|null, editorModel: string,
+ *   settings: object, engine: string, maxAttempts: number, maxPasses: number, boxPadding: number,
+ *   maxPatches: number, geometryLimits: object, scratchRoot: string, notify: Function,
+ *   usedNames: Set<string>, warnings: string[] }} params
+ * @returns {Promise<{ replaced: object[], kept: object[] }>}
+ * @ai.hint io
+ */
+async function restoreScreen({
+    file, index, root, workDir, client, roles, model, effort, editorModel, settings, engine,
+    maxAttempts, maxPasses, boxPadding, maxPatches, geometryLimits, scratchRoot, notify,
+    usedNames, warnings,
+}) {
+    const replaced = [];
+    const kept = [];
+    // Every screen works in a directory of its own: two screens must not write the same
+    // fragment file at the same time.
+    const scratch = path.join(scratchRoot, String(index + 1));
+
+    const frame = await rasterInfo(file.abs, { cwd: root, engine }).catch(() => null);
+    if (!frame?.width || !frame?.height) {
+        warnings.push(`reconstruct: cannot read ${file.rel}`);
+        kept.push({ from: file.rel, kept: true, reason: 'the file cannot be read' });
+        return { replaced, kept };
+    }
+
+    const original = await sourcePart(root, file.source);
+    await mkdir(scratch, { recursive: true }).catch(() => {});
+
+    // The screen the AI works on. The first pass sees the rectified result when the rectify
+    // stage produced one — the file the screens of the state point at — and the crop of the
+    // reference when it did not. Every later pass sees the result of the repairs before it.
+    let currentAbs = file.abs;
+    let applied = [];
+    let verification = null;
+    let geometry = null;
+    let clean = false;
+    let refused = false;
+    let endReason = '';
+
+    try {
+        for (let pass = 1; pass <= maxPasses; pass++) {
+            const plan = await askRestorer({
+                roles,
+                file,
+                frame,
+                original,
+                model,
+                effort,
+                pass,
+                maxPasses,
+                repaired: applied,
+                picture: currentAbs,
+            });
+            if (!plan?.data) {
+                warnings.push(`reconstruct: ${file.rel}: the restoration plan was not read `
+                    + `(${plan?.error ?? plan?.status ?? 'unknown'}); the file stays as it is`);
+                endReason = 'the restorer did not answer';
+                break;
+            }
+            const named = readGeometry(plan.data.geometry, geometryLimits);
+            for (const refusal of named.refused) {
+                warnings.push(`reconstruct: ${file.rel}: ${refusal}`);
+            }
+            const wantsGeometry = named.rotateDeg != null || named.scalePercent != null;
+            if (wantsGeometry) geometry = named;
+
+            // The regions of the earlier passes are not to be repaired again: the editor is
+            // asked about a box once, and the second answer would silently overwrite the first.
+            const wanted = Array.isArray(plan.data.patches) ? plan.data.patches : [];
+            const accepted = pickPatches(wanted, {
+                frameWidth: frame.width,
+                frameHeight: frame.height,
+                maxPatches,
+                taken: applied.map((item) => item.region ?? item.box),
+            });
+            for (const rejected of accepted.rejected) {
+                warnings.push(`reconstruct: ${file.rel}: the patch `
+                    + `(${rejected.patch.x},${rejected.patch.y}) ${rejected.patch.width}×${rejected.patch.height} `
+                    + `was refused — ${rejected.reason}`);
+            }
+            if (!accepted.patches.length) {
+                // Nothing new to repair: either the screen is whole, or every region the role
+                // named was repaired already, or every region it named was refused.
+                clean = !wanted.length && !wantsGeometry && !applied.length;
+                if (!clean && !wantsGeometry && !applied.length) endReason = 'every patch was refused';
+                break;
+            }
+
+            notify({
+                type: 'reconstruct.start',
+                file: file.rel,
+                patches: accepted.patches.length,
+                assessment: plan.data.assessment ?? '',
+                model: editorModel,
+                pass,
+            });
+
+            // Each patch is applied to the result of the previous one, so the last merge is the
+            // file that replaces the screen. Every patch is checked on its own: a repair the
+            // check refuses ends the screen there, so the editor is not asked again for a
+            // screen that is already beyond repair.
+            let repaired = 0;
+            for (const [patchIndex, patch] of accepted.patches.entries()) {
+                // The editor works on the picture the stage started with when the model
+                // redraws what it is given; otherwise it works on the result of the repairs
+                // before it.
+                const editorSource = prefersStartPicture(editorModel) ? file.abs : currentAbs;
+                const box = planFragment(patch, {
+                    frameWidth: frame.width,
+                    frameHeight: frame.height,
+                    margin: boxPadding,
+                });
+                const fragmentAbs = path.join(scratch, `${pass}-${patchIndex + 1}-fragment.png`);
+                const editedAbs = path.join(scratch, `${pass}-${patchIndex + 1}-edited.png`);
+                const mergedAbs = path.join(scratch, `${pass}-${patchIndex + 1}-merged.png`);
+                try {
+                    await rasterCrop({
+                        input: editorSource,
+                        output: fragmentAbs,
+                        x: box.x,
+                        y: box.y,
+                        width: box.width,
+                        height: box.height,
+                        cwd: root,
+                        engine,
+                    });
+                    const fragment = await readFile(fragmentAbs);
+                    const edited = await editFragment({
+                        client,
+                        editorModel,
+                        prompt: editorPrompt(patch.prompt),
+                        filename: path.basename(fragmentAbs),
+                        bytes: fragment,
+                        maxAttempts,
+                        quality: settings.quality ?? null,
+                    });
+                    if (!edited) {
+                        warnings.push(`reconstruct: ${file.rel}: region ${patchIndex + 1} was not repaired`);
+                        continue;
+                    }
+                    await writeFile(editedAbs, edited);
+                    const merged = await rasterPatch({
+                        input: currentAbs,
+                        patch: editedAbs,
+                        output: mergedAbs,
+                        x: box.x,
+                        y: box.y,
+                        width: box.width,
+                        height: box.height,
+                        cwd: root,
+                        engine,
+                    });
+                    const check = await verifyRepair({
+                        roles,
+                        before: currentAbs,
+                        after: mergedAbs,
+                        root,
+                        model,
+                        effort,
+                    }).catch((error) => ({ verdict: 'worse', reason: error?.message ?? String(error) }));
+                    if (check.verdict !== 'better') {
+                        warnings.push(`reconstruct: ${file.rel}: the repair was refused by the verification `
+                            + `(${check.verdict}: ${check.reason}) — the screen is left as it was`);
+                        verification = check;
+                        refused = true;
+                        break;
+                    }
+                    applied.push({
+                        kind: patch.kind,
+                        box: merged.box,
+                        region: { x: patch.x, y: patch.y, width: patch.width, height: patch.height },
+                        finding: patch.finding,
+                        prompt: patch.prompt,
+                        resized: merged.resized,
+                        grown: box.grown,
+                    });
+                    verification = check;
+                    currentAbs = mergedAbs;
+                    repaired += 1;
+                } catch (error) {
+                    warnings.push(`reconstruct: ${file.rel}: region ${patchIndex + 1} was not repaired (${error?.message ?? error})`);
+                } finally {
+                    await unlink(fragmentAbs).catch(() => {});
+                    await unlink(editedAbs).catch(() => {});
+                    // The merged file is the base of the next patch only while it is accepted;
+                    // a refused one is deleted with the rest of the scratch.
+                    if (currentAbs !== mergedAbs) await unlink(mergedAbs).catch(() => {});
+                }
+            }
+            // A pass that brought nothing ends the screen: there is nothing to build on.
+            if (refused || !repaired) break;
+        }
+
+        if (clean) {
+            kept.push({ from: file.rel, kept: true, reason: 'the screen is clean' });
+            return { replaced, kept };
+        }
+        // A screen that was never touched keeps the reason of the failure; a screen with
+        // repairs in it is saved as it is, with what was repaired.
+        if (endReason && !applied.length) {
+            kept.push({ from: file.rel, kept: true, reason: endReason });
+            return { replaced, kept };
+        }
+
+        // The pixels are checked before the geometry is applied: a rotation moves every element
+        // of the screen, and the verifier would call that a change it has to refuse.
+        let baseAbs = currentAbs;
+        let geometryResult = null;
+        const wantsGeometry = geometry != null && (geometry.rotateDeg != null || geometry.scalePercent != null);
+        if (wantsGeometry) {
+            if (!geometryLimits.enabled) {
+                warnings.push(`reconstruct: ${file.rel}: the geometry correction is switched off`);
+            } else {
+                const geometryAbs = path.join(scratch, 'geometry.png');
+                try {
+                    const geo = await applyGeometry({
+                        input: baseAbs,
+                        output: geometryAbs,
+                        rotateDeg: geometry.rotateDeg ?? 0,
+                        scalePercent: geometry.scalePercent ?? 0,
+                        cwd: root,
+                        engine,
+                    });
+                    const before = Math.abs(geo.residualBefore.angleDeg ?? 0);
+                    const after = Math.abs(geo.residualAfter.angleDeg ?? 0);
+                    const measured = geo.residualAfter.measured === true;
+                    const worse = geometry.rotateDeg != null && measured
+                        && !(after < before - geometryLimits.minImprovementDeg);
+                    if (worse) {
+                        warnings.push(`reconstruct: ${file.rel}: the geometry correction was rolled back — `
+                            + `the tilt went from ${before}° to ${after}°`);
+                        notify({
+                            type: 'reconstruct.geometry',
+                            file: file.rel,
+                            status: 'rolled back',
+                            rotateDeg: geometry.rotateDeg ?? 0,
+                            scalePercent: geometry.scalePercent ?? 0,
+                            before,
+                            after,
+                        });
+                    } else {
+                        geometryResult = geo;
+                        baseAbs = geometryAbs;
+                        notify({
+                            type: 'reconstruct.geometry',
+                            file: file.rel,
+                            status: 'applied',
+                            rotateDeg: geometry.rotateDeg ?? 0,
+                            scalePercent: geometry.scalePercent ?? 0,
+                            before,
+                            after,
+                        });
+                    }
+                } catch (error) {
+                    warnings.push(`reconstruct: ${file.rel}: the geometry correction failed (${error?.message ?? error})`);
+                }
+            }
+        }
+
+        if (baseAbs === file.abs) {
+            kept.push({ from: file.rel, kept: true, reason: applied.length ? 'the screen stays as it is' : 'nothing was changed' });
+            notify({
+                type: 'reconstruct.done', file: file.rel, status: applied.length ? 'rejected' : 'failed',
+                patches: applied.length, verdict: verification?.verdict ?? null,
+            });
+            return { replaced, kept };
+        }
+
+        const name = uniqueName(path.basename(file.rel), usedNames);
+        const to = toPosix(path.join(workDir, RESTORED_DIR, name));
+        const target = path.join(root, ...to.split('/'));
+        try {
+            await mkdir(path.dirname(target), { recursive: true });
+            await copyFile(baseAbs, target);
+        } catch (error) {
+            warnings.push(`reconstruct: ${file.rel}: the repaired file was not saved (${error?.message ?? error})`);
+            kept.push({ from: file.rel, kept: true, reason: 'the result was not saved' });
+            notify({ type: 'reconstruct.done', file: file.rel, status: 'failed', patches: applied.length });
+            return { replaced, kept };
+        }
+
+        const saved = await stat(target).catch(() => null);
+        replaced.push({ from: file.rel, to, patches: applied, geometry: geometryResult, verification, bytes: saved?.size ?? 0 });
+        notify({
+            type: 'reconstruct.done',
+            file: file.rel,
+            status: 'repaired',
+            to,
+            patches: applied.length,
+            verdict: verification?.verdict ?? null,
+        });
+    } finally {
+        await rm(scratch, { recursive: true, force: true }).catch(() => {});
+    }
+    return { replaced, kept };
+}
+
+/**
  * Run the reconstruct stage.
  *
  * Nothing here overwrites an input: each repaired screen is a new file under `restored/`. A screen
@@ -247,288 +553,52 @@ export async function runReconstruct(state, notify = () => {}) {
     await mkdir(outDir, { recursive: true });
     const scratch = path.join(root, workDir, '.restore');
 
-    const replaced = [];
-    const kept = [];
     const usedNames = new Set();
 
-    for (const file of files) {
-        const frame = await rasterInfo(file.abs, { cwd: root, engine }).catch(() => null);
-        if (!frame?.width || !frame?.height) {
-            warnings.push(`reconstruct: cannot read ${file.rel}`);
-            kept.push({ from: file.rel, kept: true, reason: 'the file cannot be read' });
+    // The screens are worked on at the same time: the plan of one screen does not depend on the
+    // plan of the next one, and a round of parallel calls is what the batch route is for.
+    const outcomes = await Promise.allSettled(files.map((file, index) => restoreScreen({
+        file,
+        index,
+        root,
+        workDir,
+        client,
+        roles,
+        model,
+        effort,
+        editorModel,
+        settings,
+        engine,
+        maxAttempts,
+        maxPasses,
+        boxPadding,
+        maxPatches,
+        geometryLimits,
+        scratchRoot: scratch,
+        notify,
+        usedNames,
+        warnings,
+    })));
+
+    const replaced = [];
+    const kept = [];
+    let submitted = null;
+    for (const [index, outcome] of outcomes.entries()) {
+        if (outcome.status === 'fulfilled') {
+            replaced.push(...outcome.value.replaced);
+            kept.push(...outcome.value.kept);
             continue;
         }
-
-        const original = await sourcePart(root, file.source);
-        await mkdir(scratch, { recursive: true }).catch(() => {});
-
-        // The screen the AI works on. The first pass sees the rectified result when the rectify
-        // stage produced one — the file the screens of the state point at — and the crop of the
-        // reference when it did not. Every later pass sees the result of the repairs before it.
-        let currentAbs = file.abs;
-        let applied = [];
-        let verification = null;
-        let geometry = null;
-        let clean = false;
-        let refused = false;
-        let endReason = '';
-
-        try {
-            for (let pass = 1; pass <= maxPasses; pass++) {
-                const plan = await askRestorer({
-                    roles,
-                    file,
-                    frame,
-                    original,
-                    model,
-                    effort,
-                    pass,
-                    maxPasses,
-                    repaired: applied,
-                    picture: currentAbs,
-                });
-                if (!plan?.data) {
-                    warnings.push(`reconstruct: ${file.rel}: the restoration plan was not read `
-                        + `(${plan?.error ?? plan?.status ?? 'unknown'}); the file stays as it is`);
-                    endReason = 'the restorer did not answer';
-                    break;
-                }
-                const named = readGeometry(plan.data.geometry, geometryLimits);
-                for (const refusal of named.refused) {
-                    warnings.push(`reconstruct: ${file.rel}: ${refusal}`);
-                }
-                const wantsGeometry = named.rotateDeg != null || named.scalePercent != null;
-                if (wantsGeometry) geometry = named;
-
-                // The regions of the earlier passes are not to be repaired again: the editor is
-                // asked about a box once, and the second answer would silently overwrite the first.
-                const wanted = Array.isArray(plan.data.patches) ? plan.data.patches : [];
-                const accepted = pickPatches(wanted, {
-                    frameWidth: frame.width,
-                    frameHeight: frame.height,
-                    maxPatches,
-                    taken: applied.map((item) => item.region ?? item.box),
-                });
-                for (const rejected of accepted.rejected) {
-                    warnings.push(`reconstruct: ${file.rel}: the patch `
-                        + `(${rejected.patch.x},${rejected.patch.y}) ${rejected.patch.width}×${rejected.patch.height} `
-                        + `was refused — ${rejected.reason}`);
-                }
-                if (!accepted.patches.length) {
-                    // Nothing new to repair: either the screen is whole, or every region the role
-                    // named was repaired already, or every region it named was refused.
-                    clean = !wanted.length && !wantsGeometry && !applied.length;
-                    if (!clean && !wantsGeometry && !applied.length) endReason = 'every patch was refused';
-                    break;
-                }
-
-                notify({
-                    type: 'reconstruct.start',
-                    file: file.rel,
-                    patches: accepted.patches.length,
-                    assessment: plan.data.assessment ?? '',
-                    model: editorModel,
-                    pass,
-                });
-
-                // Each patch is applied to the result of the previous one, so the last merge is the
-                // file that replaces the screen. Every patch is checked on its own: a repair the
-                // check refuses ends the screen there, so the editor is not asked again for a
-                // screen that is already beyond repair.
-                let repaired = 0;
-                for (const [index, patch] of accepted.patches.entries()) {
-                    // The editor works on the picture the stage started with when the model
-                    // redraws what it is given; otherwise it works on the result of the repairs
-                    // before it.
-                    const editorSource = prefersStartPicture(editorModel) ? file.abs : currentAbs;
-                    const box = planFragment(patch, {
-                        frameWidth: frame.width,
-                        frameHeight: frame.height,
-                        margin: boxPadding,
-                    });
-                    const fragmentAbs = path.join(scratch, `${pass}-${index + 1}-fragment.png`);
-                    const editedAbs = path.join(scratch, `${pass}-${index + 1}-edited.png`);
-                    const mergedAbs = path.join(scratch, `${pass}-${index + 1}-merged.png`);
-                    try {
-                        await rasterCrop({
-                            input: editorSource,
-                            output: fragmentAbs,
-                            x: box.x,
-                            y: box.y,
-                            width: box.width,
-                            height: box.height,
-                            cwd: root,
-                            engine,
-                        });
-                        const fragment = await readFile(fragmentAbs);
-                        const edited = await editFragment({
-                            client,
-                            editorModel,
-                            prompt: editorPrompt(patch.prompt),
-                            filename: path.basename(fragmentAbs),
-                            bytes: fragment,
-                            maxAttempts,
-                            quality: settings.quality ?? null,
-                        });
-                        if (!edited) {
-                            warnings.push(`reconstruct: ${file.rel}: region ${index + 1} was not repaired`);
-                            continue;
-                        }
-                        await writeFile(editedAbs, edited);
-                        const merged = await rasterPatch({
-                            input: currentAbs,
-                            patch: editedAbs,
-                            output: mergedAbs,
-                            x: box.x,
-                            y: box.y,
-                            width: box.width,
-                            height: box.height,
-                            cwd: root,
-                            engine,
-                        });
-                        const check = await verifyRepair({
-                            roles,
-                            before: currentAbs,
-                            after: mergedAbs,
-                            root,
-                            model,
-                            effort,
-                        }).catch((error) => ({ verdict: 'worse', reason: error?.message ?? String(error) }));
-                        if (check.verdict !== 'better') {
-                            warnings.push(`reconstruct: ${file.rel}: the repair was refused by the verification `
-                                + `(${check.verdict}: ${check.reason}) — the screen is left as it was`);
-                            verification = check;
-                            refused = true;
-                            break;
-                        }
-                        applied.push({
-                            kind: patch.kind,
-                            box: merged.box,
-                            region: { x: patch.x, y: patch.y, width: patch.width, height: patch.height },
-                            finding: patch.finding,
-                            prompt: patch.prompt,
-                            resized: merged.resized,
-                            grown: box.grown,
-                        });
-                        verification = check;
-                        currentAbs = mergedAbs;
-                        repaired += 1;
-                    } catch (error) {
-                        warnings.push(`reconstruct: ${file.rel}: region ${index + 1} was not repaired (${error?.message ?? error})`);
-                    } finally {
-                        await unlink(fragmentAbs).catch(() => {});
-                        await unlink(editedAbs).catch(() => {});
-                        // The merged file is the base of the next patch only while it is accepted;
-                        // a refused one is deleted with the rest of the scratch.
-                        if (currentAbs !== mergedAbs) await unlink(mergedAbs).catch(() => {});
-                    }
-                }
-                // A pass that brought nothing ends the screen: there is nothing to build on.
-                if (refused || !repaired) break;
-            }
-
-            if (clean) {
-                kept.push({ from: file.rel, kept: true, reason: 'the screen is clean' });
-                continue;
-            }
-            // A screen that was never touched keeps the reason of the failure; a screen with
-            // repairs in it is saved as it is, with what was repaired.
-            if (endReason && !applied.length) {
-                kept.push({ from: file.rel, kept: true, reason: endReason });
-                continue;
-            }
-
-            // The pixels are checked before the geometry is applied: a rotation moves every element
-            // of the screen, and the verifier would call that a change it has to refuse.
-            let baseAbs = currentAbs;
-            let geometryResult = null;
-            const wantsGeometry = geometry != null && (geometry.rotateDeg != null || geometry.scalePercent != null);
-            if (wantsGeometry) {
-                if (!geometryLimits.enabled) {
-                    warnings.push(`reconstruct: ${file.rel}: the geometry correction is switched off`);
-                } else {
-                    const geometryAbs = path.join(scratch, 'geometry.png');
-                    try {
-                        const geo = await applyGeometry({
-                            input: baseAbs,
-                            output: geometryAbs,
-                            rotateDeg: geometry.rotateDeg ?? 0,
-                            scalePercent: geometry.scalePercent ?? 0,
-                            cwd: root,
-                            engine,
-                        });
-                        const before = Math.abs(geo.residualBefore.angleDeg ?? 0);
-                        const after = Math.abs(geo.residualAfter.angleDeg ?? 0);
-                        const measured = geo.residualAfter.measured === true;
-                        const worse = geometry.rotateDeg != null && measured
-                            && !(after < before - geometryLimits.minImprovementDeg);
-                        if (worse) {
-                            warnings.push(`reconstruct: ${file.rel}: the geometry correction was rolled back — `
-                                + `the tilt went from ${before}° to ${after}°`);
-                            notify({
-                                type: 'reconstruct.geometry',
-                                file: file.rel,
-                                status: 'rolled back',
-                                rotateDeg: geometry.rotateDeg ?? 0,
-                                scalePercent: geometry.scalePercent ?? 0,
-                                before,
-                                after,
-                            });
-                        } else {
-                            geometryResult = geo;
-                            baseAbs = geometryAbs;
-                            notify({
-                                type: 'reconstruct.geometry',
-                                file: file.rel,
-                                status: 'applied',
-                                rotateDeg: geometry.rotateDeg ?? 0,
-                                scalePercent: geometry.scalePercent ?? 0,
-                                before,
-                                after,
-                            });
-                        }
-                    } catch (error) {
-                        warnings.push(`reconstruct: ${file.rel}: the geometry correction failed (${error?.message ?? error})`);
-                    }
-                }
-            }
-
-            if (baseAbs === file.abs) {
-                kept.push({ from: file.rel, kept: true, reason: applied.length ? 'the screen stays as it is' : 'nothing was changed' });
-                notify({
-                    type: 'reconstruct.done', file: file.rel, status: applied.length ? 'rejected' : 'failed',
-                    patches: applied.length, verdict: verification?.verdict ?? null,
-                });
-                continue;
-            }
-
-            const name = uniqueName(path.basename(file.rel), usedNames);
-            const to = toPosix(path.join(workDir, RESTORED_DIR, name));
-            const target = path.join(root, ...to.split('/'));
-            try {
-                await mkdir(path.dirname(target), { recursive: true });
-                await copyFile(baseAbs, target);
-            } catch (error) {
-                warnings.push(`reconstruct: ${file.rel}: the repaired file was not saved (${error?.message ?? error})`);
-                kept.push({ from: file.rel, kept: true, reason: 'the result was not saved' });
-                notify({ type: 'reconstruct.done', file: file.rel, status: 'failed', patches: applied.length });
-                continue;
-            }
-
-            const saved = await stat(target).catch(() => null);
-            replaced.push({ from: file.rel, to, patches: applied, geometry: geometryResult, verification, bytes: saved?.size ?? 0 });
-            notify({
-                type: 'reconstruct.done',
-                file: file.rel,
-                status: 'repaired',
-                to,
-                patches: applied.length,
-                verdict: verification?.verdict ?? null,
-            });
-        } finally {
-            await rm(scratch, { recursive: true, force: true }).catch(() => {});
+        // The batch was submitted and the answers are not here yet: the run stops and waits for
+        // the second phase. It is not a failure of the screen.
+        if (outcome.reason?.code === BATCH_SUBMITTED) {
+            submitted = outcome.reason;
+            continue;
         }
+        warnings.push(`reconstruct: ${files[index].rel}: ${outcome.reason?.message ?? outcome.reason}`);
+        kept.push({ from: files[index].rel, kept: true, reason: 'the screen was not restored' });
     }
+    if (submitted) throw submitted;
 
     state.restored.push(...replaced, ...kept);
 

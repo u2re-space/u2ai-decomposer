@@ -16,6 +16,7 @@ import { restorerInstructions, restorerVerifyInstructions } from './restorer.js'
 import { overlapInstructions } from './overlap.js';
 import { directorInstructions } from './director.js';
 import { parseResponse } from '../openai/responses.js';
+import { BATCH_SUBMITTED } from '../openai/batch.js';
 import { getModelProfile, snapEffort } from '../model/profiles.js';
 
 /**
@@ -168,6 +169,9 @@ export function createRoleRunner({ client, config = {}, model = null, effort = n
                     signal,
                     onEvent,
                     stream,
+                    // One turn, one question: the request may be a part of a parallel round, and
+                    // then it may go into the batch of that round.
+                    batchable: turns === 1,
                 });
                 const parsed = parseResponse(answer);
                 last = parsed;
@@ -197,6 +201,9 @@ export function createRoleRunner({ client, config = {}, model = null, effort = n
                 }
             }
         } catch (error) {
+            // The batch is out and the answers are not here yet: the run stops and waits for
+            // the second phase. This is not a failure of the role.
+            if (error?.code === BATCH_SUBMITTED) throw error;
             return {
                 status: 'error', data: null, text: last?.text ?? '', toolCalls: last?.toolCalls ?? [],
                 usage: last?.usage ?? null, error: error?.message ?? String(error),
