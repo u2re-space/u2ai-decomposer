@@ -113,6 +113,14 @@ function validateStage(id, section, fail) {
       if (!(Number.isFinite(section[key]) && section[key] >= 0)) fail(`${where}.${key}: число ≥ 0`);
     }
     if ('review' in section && typeof section.review !== 'boolean') fail(`${where}.review: true | false`);
+    if (!ENUMS.rectifyModes.includes(section.mode)) fail(`${where}.mode: ${ENUMS.rectifyModes.join(' | ')}`);
+    for (const key of ['straightenAttempts', 'maxRepairPasses', 'maxPatches', 'boxPadding']) {
+      if (key in section && !(Number.isSafeInteger(section[key]) && section[key] >= 0)) fail(`${where}.${key}: целое ≥ 0`);
+    }
+    if ('cleanOverlap' in section && typeof section.cleanOverlap !== 'boolean') fail(`${where}.cleanOverlap: true | false`);
+    if ('quality' in section && section.quality != null && !ENUMS.imageQualities.includes(section.quality)) {
+      fail(`${where}.quality: ${ENUMS.imageQualities.join(' | ')}`);
+    }
   }
   if (id === 'reconstruct' && section.geometry != null) {
     const geometry = section.geometry;

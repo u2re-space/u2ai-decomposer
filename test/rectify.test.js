@@ -718,3 +718,20 @@ test('the rectify section of the config accepts the tilt limits', () => {
     config.stages.rectify.residualSkewLimitDeg = 'flat';
     assert.throws(() => validateConfig(config), /residualSkewLimitDeg/);
 });
+
+test('the rectify section of the config accepts the mode and the ai-mode knobs', () => {
+    const config = structuredClone(defaults);
+    config.stages.rectify.mode = 'ai-mode';
+    config.stages.rectify.maxRepairPasses = 2;
+    config.stages.rectify.maxPatches = 3;
+    config.stages.rectify.boxPadding = 16;
+    config.stages.rectify.straightenAttempts = 1;
+    config.stages.rectify.cleanOverlap = true;
+    config.stages.rectify.quality = 'low';
+    assert.doesNotThrow(() => validateConfig(config));
+    config.stages.rectify.mode = 'magic';
+    assert.throws(() => validateConfig(config), /stages\.rectify\.mode/);
+    config.stages.rectify.mode = 'ai-mode';
+    config.stages.rectify.maxRepairPasses = 1.5;
+    assert.throws(() => validateConfig(config), /maxRepairPasses/);
+});

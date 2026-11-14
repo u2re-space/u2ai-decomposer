@@ -41,7 +41,7 @@ export function stripDetach(argv) {
 /**
  * Minimal argv parser for ai-decompose: image input, output dir, stages, config, model.
  * @param {string[]} argv
- * @returns {{ image: string[], out: string, config: string|null, stages: string[], model: string|null, effort: string|null, imageModel: string|null, configPath: string|null, verbose: boolean }}
+ * @returns {{ image: string[], out: string, config: string|null, stages: string[], model: string|null, effort: string|null, imageModel: string|null, configPath: string|null, verbose: boolean, aiMode: boolean }}
  */
 export function parseArgv(argv) {
     const parsed = parseArgs({
@@ -62,6 +62,7 @@ export function parseArgv(argv) {
             'stop-after': { type: 'string' },
             'batch': { type: 'boolean', default: false },
             'batch-fetch': { type: 'boolean', default: false },
+            'ai-mode': { type: 'boolean', default: false },
         },
         strict: false,
         allowPositionals: true,
@@ -92,6 +93,7 @@ export function parseArgv(argv) {
         stopAfter: parsed.values['stop-after'] ?? null,
         batch: parsed.values.batch === true,
         batchFetch: parsed.values['batch-fetch'] === true,
+        aiMode: parsed.values['ai-mode'] === true,
         positionals: parsed.positionals,
     };
 }
@@ -138,7 +140,10 @@ export async function main(argv = process.argv.slice(2)) {
     const opts = parseArgv(argv);
     let config;
     try {
-        config = await loadConfig({ configPath: opts.configPath, cwd: process.cwd() });
+        // The one-shot switch of the rectify stage: `--ai-mode` turns the AI mode on for this
+        // run, whatever the config file says.
+        const overrides = opts.aiMode ? { stages: { rectify: { mode: 'ai-mode' } } } : {};
+        config = await loadConfig({ configPath: opts.configPath, cwd: process.cwd(), overrides });
     } catch (error) {
         console.error(error?.message ?? String(error));
         return 1;

@@ -206,6 +206,46 @@ treated as a crop — it carries work of its own and is worked on as it is.
 One picture cut into several screens becomes several screens in `decomposition.json`: the chain
 of the files follows every branch, so the answer names every screen of the collage.
 
+### The AI mode of the rectify stage
+
+`stages.rectify.mode` says who straightens the picture. The default, `geometry`, keeps the role
+where it belongs: it names the four corners of every screen and the harness projects the pixels.
+`ai-mode` puts the AI in front of the whole reference and keeps the geometry behind it:
+
+1. **The AI straightens the reference first.** The reference is sent to the image editor as a whole
+   picture, and the answer is measured: the residual tilt of the straightened picture has to be no
+   worse than the tilt of the original. A straightening that does not flatten the reference is
+   thrown away, and the stage goes on with the original bytes.
+2. **The cut is still made by the geometry.** The screens are cut out of the straightened reference
+   by the same corners and the same projection as in the `geometry` mode — the AI does not draw the
+   screens, it only gives the geometry a better picture to cut.
+3. **What is still broken is repaired by fragments.** The broken parts of a screen are named, cut
+   out, sent to the editor one by one and stitched back into exactly their boxes; a repair that is
+   not better than the picture it replaces is refused, and the screen keeps the bytes it had.
+4. **The content of the neighbours is removed in the same stage.** The pieces of the neighbouring
+   screens that came along with the cut are cleaned up here, so the separate `overlap` stage does
+   not pay for the same work twice.
+
+The mode is a setting of the stage:
+
+```json
+{
+  "stages": {
+    "rectify": {
+      "mode": "ai-mode",
+      "straightenAttempts": 1,
+      "maxRepairPasses": 2,
+      "maxPatches": 3,
+      "boxPadding": 16,
+      "quality": "low",
+      "cleanOverlap": true
+    }
+  }
+}
+```
+
+The same thing for one run only is the flag `--ai-mode`; it wins over the config file.
+
 ### Restoring a screen (reconstruct)
 
 The restorer works in two halves, and the split is deliberate.

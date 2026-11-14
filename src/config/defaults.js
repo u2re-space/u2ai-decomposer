@@ -207,6 +207,12 @@ export const defaults = {
     },
     rectify: {
       enabled: true,
+      /**
+       * `geometry` — the role places the corners and the harness projects the pixels.
+       * `ai-mode` — the AI straightens the reference first, the cut is still made by the
+       * geometry, and what is still broken is repaired by fragments.
+       */
+      mode: 'geometry',
       /** Max agent turns for the un-rotate/recover-projection pass. */
       maxTurns: 24,
       /** Max agent turns for the per-screen split pass. */
@@ -219,6 +225,18 @@ export const defaults = {
       minImprovementDeg: 0.4,
       /** Let the role look at its own cut and cut it again when a screen lost its edges. */
       review: true,
+      /** How many times the AI may straighten the reference in the ai-mode. */
+      straightenAttempts: 1,
+      /** How many times the AI may work on one screen in the ai-mode; a pass is a whole visit. */
+      maxRepairPasses: 2,
+      /** Max regions of one screen that may be repaired in one pass of the ai-mode. */
+      maxPatches: 3,
+      /** Padding (px) around a repair box before patching. */
+      boxPadding: 16,
+      /** The quality of the answer the editor gives for one fragment. */
+      quality: 'low',
+      /** Remove the content of the neighbouring screens inside the ai-mode. */
+      cleanOverlap: true,
     },
     reconstruct: {
       enabled: true,

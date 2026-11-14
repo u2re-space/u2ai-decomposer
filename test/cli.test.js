@@ -18,6 +18,11 @@ test('a comma-separated stage list is split into stages', () => {
     assert.equal(parsed.verbose, false);
 });
 
+test('the ai-mode switch is off unless it is asked for', () => {
+    assert.equal(parseArgv(['-i', 'a.png']).aiMode, false);
+    assert.equal(parseArgv(['-i', 'a.png', '--ai-mode']).aiMode, true);
+});
+
 test('the dry-run prints a plan without creating output or calling the client', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-dry-'));
     const events = [];

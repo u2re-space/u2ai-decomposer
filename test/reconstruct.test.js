@@ -569,7 +569,10 @@ test('the second pass of the gpt-image line never sees the pixels of the first r
     const root = await workDirWith();
     try {
         const edits = [];
-        const client = mockClient(async () => ({ images: [{ bytes: await solid(20, 20, 220), mime: 'image/png' }] }));
+        const client = mockClient(async (params) => {
+            edits.push(params);
+            return { images: [{ bytes: await solid(20, 20, 220), mime: 'image/png' }] };
+        });
         let plans = 0;
         const roles = mockRoles((name) => {
             if (name === 'restorerVerify') return { verdict: 'better', reason: 'the defect is gone' };
@@ -594,7 +597,10 @@ test('the second pass of the seedream line works on the repaired screen', async 
     const root = await workDirWith();
     try {
         const edits = [];
-        const client = mockClient(async () => ({ images: [{ bytes: await solid(20, 20, 220), mime: 'image/png' }] }));
+        const client = mockClient(async (params) => {
+            edits.push(params);
+            return { images: [{ bytes: await solid(20, 20, 220), mime: 'image/png' }] };
+        });
         let plans = 0;
         const roles = mockRoles((name) => {
             if (name === 'restorerVerify') return { verdict: 'better', reason: 'the defect is gone' };

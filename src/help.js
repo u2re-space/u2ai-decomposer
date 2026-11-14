@@ -29,6 +29,10 @@ Options:
   --batch                 Submit the requests of the parallel rounds as one batch
                           and stop: the answers are not here yet.
   --batch-fetch           Take the answers of the submitted batches and go on.
+  --ai-mode               Run the rectify stage in the AI mode: the AI straightens the
+                          reference first, the cut is still made by the geometry, and
+                          what is still broken is repaired by fragments.
+                          The same as stages.rectify.mode = "ai-mode" in the config.
   -v, --verbose           Verbose output.
   -h, --help              Show this help message.
   --version               Show version.
@@ -40,6 +44,10 @@ Pipeline stages:
   rectify         Un-rotate / recover projection, cut collages into screens.
                   The role checks its own cut and cuts it again when a screen
                   lost its edges.
+                  With stages.rectify.mode = "ai-mode" (or --ai-mode) the AI
+                  straightens the reference first, the cut is still made by the
+                  geometry, the broken parts are repaired by fragments, and the
+                  content of the neighbouring screens is removed in the same stage.
   reconstruct     Restore lost details via AI box-patch and verify.
                   The role names the tilt and the size of the screen, the
                   harness corrects the pixels and rolls the correction back

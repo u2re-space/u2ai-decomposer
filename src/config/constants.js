@@ -27,6 +27,8 @@ export const ENUMS = Object.freeze({
   /** Pipeline stages in execution order. */
   stages: Object.freeze(['extend', 'decompose', 'rectify', 'reconstruct', 'overlap', 'resolve']),
   decomposerModes: Object.freeze(['agent', 'inline']),
+  /** The modes of the rectify stage: geometry only, or geometry with the AI in the loop. */
+  rectifyModes: Object.freeze(['geometry', 'ai-mode']),
   /** Where the layers of the advanced mode come from. */
   layerSources: Object.freeze(['auto', 'seedream', 'director']),
   /** The tiers the seedream decomposition accepts; ratios and pixel frames are refused. */

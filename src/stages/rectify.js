@@ -539,7 +539,11 @@ export async function runRectify(state, notify = () => {}) {
      * @returns {Promise<object[]>} the screens that were accepted
      */
     const processUnit = async (file) => {
-        const startedAt = Date.now();
+        // The wall-clock time of the start of the work, with a sub-millisecond fraction:
+        // `Date.now()` truncates to the millisecond, and a file written in the same
+        // millisecond as the start of the run would look like a file of this run — the
+        // cleanup of the output directory would delete a file that was there before.
+        const startedAt = performance.timeOrigin + performance.now();
         const located = await resolveInside(root, file.rel, { allowRoot: false }).catch(() => null);
         if (!located) {
             warnings.push(`rectify: ${file.rel} is outside the working directory`);

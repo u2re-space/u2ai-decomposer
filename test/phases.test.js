@@ -258,12 +258,13 @@ test('the stages hold the tools their own job needs', () => {
 test('there is no mode switch left: a stage is either on or off', () => {
     for (const [name, settings] of Object.entries(defaults.stages)) {
         assert.equal(typeof settings.enabled, 'boolean', `${name} has an enabled flag`);
-        if (name === 'decompose') continue;
+        if (name === 'decompose' || name === 'rectify') continue;
         assert.equal(settings.mode, undefined, `${name} has no auto/always/off mode`);
     }
-    // The only mode that survived is the one that names a different kind of work, not a different
-    // amount of it: who cuts the screens.
+    // The only modes that survived are the ones that name a different kind of work, not a
+    // different amount of it: who cuts the screens, and who straightens the reference.
     assert.deepEqual(defaults.stages.decompose.mode, 'agent');
+    assert.deepEqual(defaults.stages.rectify.mode, 'geometry');
 });
 
 // ---------------------------------------------------------------------------
