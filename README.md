@@ -89,6 +89,27 @@ continue from, and the stage works on the pictures of `--image` instead.
 
 ## Architecture
 
+### The access layer (src/access)
+
+`src/access` is the door between the model and the machine: the files and the commands under one
+root. Both halves work through a backend, so the same rules hold on a native disk, in the memory,
+or over a remote one.
+
+```js
+import { createAccess } from './src/access/index.js';
+
+const access = createAccess({ root: process.cwd() });
+
+await access.fs.writeText('notes/todo.md', '# todo');
+const found = await access.fs.search({ query: 'todo' });
+const answer = await access.exec.run('node', ['--version']);
+```
+
+The rules of the paths live in one place and are never optional: a path may not leave the root —
+neither through `..` nor through a symbolic link — the secret files and the secret directories are
+never accessible, and the read-only directories may be read, but never written. `src/agent/paths.js`
+keeps the words of the refusals and borrows the rules from `src/access/paths.js`.
+
 ### Roles (src/roles/*.js)
 
 | Role | Stage | Purpose |
