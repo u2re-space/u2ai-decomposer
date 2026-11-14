@@ -182,6 +182,17 @@ export const defaults = {
       boxPadding: 16,
       /** Max regions of one screen that may be repaired in one pass. */
       maxPatches: 3,
+      /** The geometry the role names and the harness applies to the pixels. */
+      geometry: {
+        /** Apply the rotation and the size correction the role asks for. */
+        enabled: true,
+        /** The largest tilt the harness will apply, in degrees. */
+        maxRotateDeg: 6,
+        /** The largest size correction the harness will apply, in percent. */
+        maxScalePercent: 10,
+        /** How much flatter the screen has to be for the correction to be kept, in degrees. */
+        minImprovementDeg: 0.2,
+      },
     },
     overlap: {
       enabled: true,

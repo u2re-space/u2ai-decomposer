@@ -69,7 +69,7 @@ ai-decompose -i original.png --advanced --out ./output
 | `extender` | extend | Decide if the frame needs growing and on which edges; write the band instruction |
 | `decomposer` | decompose | Name screens, crop/restore sub-references |
 | `rectifier` | rectify | Place quad corners, call `correct_perspective` |
-| `restorer` | reconstruct | Identify defects (leftover/missing/seam/artefact), write patch instructions |
+| `restorer` | reconstruct | Identify defects (leftover/missing/seam/artefact/rounded-corner), write patch instructions, name the tilt and the size of the screen |
 | `overlap` | overlap | Compare screens, identify foreign elements in crops |
 | `director` | resolve | Assemble final JSON, manage layers/advanced |
 
@@ -78,6 +78,7 @@ ai-decompose -i original.png --advanced --out ./output
 Sharp → Canvas → ImageMagick fallback chain:
 - `raster.js`: crop, patch, decodeRgba, pad, compare, fit-to-box
 - `rectify.js`: perspective correction, residual skew measurement
+- `geometry.js`: rotation and size correction of the pixels, with the skew measured before and after
 - `magick.js`: ImageMagick wrapper
 - `padding.js`: canvas expansion
 - `canvas.js`: node-canvas abstraction
@@ -137,6 +138,35 @@ treated as a crop — it carries work of its own and is worked on as it is.
 
 One picture cut into several screens becomes several screens in `decomposition.json`: the chain
 of the files follows every branch, so the answer names every screen of the collage.
+
+### Restoring a screen (reconstruct)
+
+The restorer works in two halves, and the split is deliberate.
+
+The **pixels** are the AI's part. The role names the damaged regions — a strip of a neighbour, a
+bezel, a seam, and the **rounded corners of the display**: a corner that is cut round belongs to
+the device, not to the content of the screen, so the content has to be continued into it. The
+harness cuts the box, sends only that fragment to the editor, and stitches the answer back into
+exactly that box; every pixel outside the box is copied from the untouched source. The repair is
+then shown to the role again, side by side with the screen it replaces, and it is thrown away
+unless the answer is better — a repair that redrew the lettering is worse than the defect it
+removed.
+
+The **geometry** is the harness's part. The role names the tilt of the content in degrees and
+the size deviation in percent, and the harness turns those numbers into a rotation and a scale of
+the pixels themselves (`image/geometry`): the picture is resampled once, with an inverse map, so
+no glyph is redrawn and no element moves by hand. The canvas grows to the corrected picture —
+nothing is cropped away — and the wedges the rotation opens are filled with the pixels of the
+nearest edge.
+
+The correction is judged by the measurement, not by the model: the residual tilt is measured
+before and after, and the correction is rolled back when the screen did not become flatter. The
+numbers the role gave are limits, not facts: a tilt above `stages.reconstruct.geometry.maxRotateDeg`
+is refused with a warning instead of being applied quietly.
+
+```
+  geometry: 01-home.png — tilt 3°, size 0% (2.9° → 0.4°, applied)
+```
 
 ### What the run reports
 

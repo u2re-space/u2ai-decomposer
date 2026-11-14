@@ -13,6 +13,7 @@ import sharp from 'sharp';
 
 import { runReconstruct } from '../src/stages/reconstruct.js';
 import { EDITOR_FRAME, editorPrompt, pickPatches, planFragment } from '../src/stages/restore-plan.js';
+import { measureResidualSkewFromBytes } from '../src/image/skew.js';
 import { defaults, validateConfig } from '../src/config.js';
 
 const SCREEN_REL = 'decomposition/screens/01-home.png';
@@ -84,6 +85,27 @@ const workDirWith = async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-restore-'));
     await mkdir(path.join(root, 'decomposition', 'screens'), { recursive: true });
     await writeFile(path.join(root, 'decomposition', 'screens', '01-home.png'), await stripes());
+    await writeFile(path.join(root, 'reference.png'), await stripes());
+    return root;
+};
+
+/** The same work dir, but the screen is tilted by three degrees. */
+const workDirWithTiltedScreen = async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-restore-'));
+    await mkdir(path.join(root, 'decomposition', 'screens'), { recursive: true });
+    const level = await stripes(360, 280);
+    const rotated = await sharp(level).rotate(3).png().toBuffer();
+    const meta = await sharp(rotated).metadata();
+    const tilted = await sharp(rotated)
+        .extract({
+            left: Math.floor((meta.width - 320) / 2),
+            top: Math.floor((meta.height - 240) / 2),
+            width: 320,
+            height: 240,
+        })
+        .png()
+        .toBuffer();
+    await writeFile(path.join(root, 'decomposition', 'screens', '01-home.png'), tilted);
     await writeFile(path.join(root, 'reference.png'), await stripes());
     return root;
 };
@@ -277,4 +299,78 @@ test('the reconstruct section of the config accepts the patch limits', () => {
     assert.doesNotThrow(() => validateConfig(config));
     config.stages.reconstruct.maxPatches = 1.5;
     assert.throws(() => validateConfig(config), /maxPatches/);
+});
+
+test('the reconstruct section of the config accepts the geometry limits', () => {
+    const config = structuredClone(defaults);
+    config.stages.reconstruct.geometry.maxRotateDeg = 10;
+    config.stages.reconstruct.geometry.enabled = false;
+    assert.doesNotThrow(() => validateConfig(config));
+    config.stages.reconstruct.geometry.maxRotateDeg = 'ten';
+    assert.throws(() => validateConfig(config), /maxRotateDeg/);
+    config.stages.reconstruct.geometry.maxRotateDeg = 10;
+    config.stages.reconstruct.geometry.tilt = 3;
+    assert.throws(() => validateConfig(config), /неизвестное поле/);
+});
+
+// ---------------------------------------------------------------------------
+// The geometry
+// ---------------------------------------------------------------------------
+
+test('the geometry the role names is applied to the pixels and reported', async () => {
+    const root = await workDirWithTiltedScreen();
+    try {
+        const events = [];
+        const client = mockClient(async () => { throw new Error('a whole screen must not reach the editor'); });
+        const roles = mockRoles({
+            verdict: 'straighten',
+            assessment: 'the screen is whole, but it is tilted',
+            patches: [],
+            geometry: { rotateDeg: 3, scalePercent: 0, reason: 'the content runs downhill to the right' },
+        });
+        const state = stateFor(root, roles, { client });
+        await runReconstruct(state, (event) => events.push(event));
+
+        const geometry = events.find((event) => event.type === 'reconstruct.geometry');
+        assert.ok(geometry, 'the geometry is reported');
+        assert.equal(geometry.status, 'applied');
+        assert.ok(geometry.before > 2 && geometry.after < 1, JSON.stringify(geometry));
+
+        const restored = state.restored.find((item) => item.to);
+        assert.equal(restored.to, 'decomposition/restored/01-home.png', state.warnings.join('; '));
+        assert.equal(state.screens[0].subReference, 'decomposition/restored/01-home.png');
+        assert.equal(state.screens[0].subReferenceKind, 'restored');
+
+        const saved = await readFile(path.join(root, 'decomposition', 'restored', '01-home.png'));
+        const skew = await measureResidualSkewFromBytes(saved);
+        assert.ok(skew.angleDeg < 1, `the restored screen is tilted by ${skew.angleDeg}°`);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('a geometry correction that makes the screen worse is rolled back', async () => {
+    const root = await workDirWith();
+    try {
+        const events = [];
+        const client = mockClient(async () => { throw new Error('a whole screen must not reach the editor'); });
+        const roles = mockRoles({
+            verdict: 'straighten',
+            assessment: 'the screen is whole, but it is tilted',
+            patches: [],
+            geometry: { rotateDeg: 3, scalePercent: 0, reason: 'the content runs downhill to the right' },
+        });
+        const state = stateFor(root, roles, { client });
+        await runReconstruct(state, (event) => events.push(event));
+
+        const geometry = events.find((event) => event.type === 'reconstruct.geometry');
+        assert.ok(geometry, 'the geometry is reported');
+        assert.equal(geometry.status, 'rolled back');
+        assert.ok(geometry.after > geometry.before, JSON.stringify(geometry));
+        assert.match(state.warnings.join('\n'), /rolled back/);
+        assert.equal(state.restored.find((item) => item.to), undefined);
+        assert.deepEqual(state.images, [SCREEN_REL]);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
 });

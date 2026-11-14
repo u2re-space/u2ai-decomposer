@@ -36,6 +36,9 @@ Pipeline stages:
                   The role checks its own cut and cuts it again when a screen
                   lost its edges.
   reconstruct     Restore lost details via AI box-patch and verify.
+                  The role names the tilt and the size of the screen, the
+                  harness corrects the pixels and rolls the correction back
+                  when the measurement says it did not help.
   overlap         Remove overlapping elements from/by other screens (AI).
   resolve         Assemble final decomposition.json + layers (advanced).
 

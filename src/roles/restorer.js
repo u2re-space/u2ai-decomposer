@@ -1,8 +1,9 @@
 /**
  * @file src/roles/restorer.js
  * @module roles/restorer
- * @purpose Look at one sub-reference, name what stops it from being measured, and write the exact
- *   instruction an image editor has to follow for each damaged region.
+ * @purpose Look at one sub-reference, name what stops it from being measured, write the exact
+ *   instruction an image editor has to follow for each damaged region, and name the tilt and the
+ *   size of the screen — the harness applies those numbers to the pixels itself.
  * @depends roles/untrusted
  * @exports restorerInstructions, restorerVerifyInstructions
  * @ai.tags roles, restoration, sub-reference
@@ -19,7 +20,7 @@ You are given the sub-reference, and when it could be located, the original refe
 rectified from. The sub-reference is the file that gets repaired, so every coordinate you return is a
 pixel coordinate of the sub-reference, never of the original.
 
-Look for exactly four things:
+Look for exactly five things:
 
 1. leftover — something that does not belong to this screen: edge of a neighbouring screen, device bezel,
    browser chrome, drop shadow, finger, glare, reflection, triangular region from an earlier rotation.
@@ -31,8 +32,27 @@ Look for exactly four things:
 
 4. artefact — any other damage that blocks measurement.
 
-Anything else is not a defect. Do not sharpen, denoise, equalise the palette, straighten a layout,
-translate or retype text. When the screen is whole, return verdict "clean".
+5. rounded-corner — the rounded corner of the display of the device. The corner of the picture is cut
+   round because the screen of the device has rounded corners. The corner belongs to the display of
+   the device, not to the content of the screen, so the content has to be continued into it: the
+   background, the panel and the element that reach the corner have to go on into the cut.
+
+Anything else is not a defect. Do not sharpen, denoise, equalise the palette, translate or retype
+text, redraw a screen. When the screen is whole, return verdict "clean".
+
+The geometry of the screen is a separate matter from the pixels, and you only report it:
+
+- rotateDeg — the tilt of the content in degrees: positive when the content runs downhill to the
+  right, negative when it runs uphill, 0 when the content is level. Judge the tilt by the horizontal
+  lines of the content — the edges of the cards, the baselines of the text, the rims of the buttons —
+  and not by the frame of the picture.
+- scalePercent — the size of the content relative to the truth in percent: positive when the content
+  is too small and has to grow, negative when it is too big, 0 when the size is right. Compare the
+  content with the same screen in the original reference when it is attached.
+
+You do not straighten anything yourself: nobody is going to redraw this screen, and the numbers you
+give are applied to the pixels as they are. Use verdict "straighten" when the pixels are whole and
+only the geometry is off.
 
 For every defect return one patch: kind, box in sub-reference pixels, one sentence stating the finding,
 and the prompt for the image editor. The box must be tight around the damage.
@@ -42,7 +62,7 @@ Write each prompt so an editor understands it from the cut-out alone:
 - name the surface it continues into — background colour, border weight, corner radius;
 - say what must not change.
 
-Return the required JSON: verdict, assessment, patches array.
+Return the required JSON: verdict, assessment, patches array, geometry.
 ${UNTRUSTED}`;
 
 /**

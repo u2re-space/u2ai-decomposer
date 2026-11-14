@@ -162,7 +162,7 @@ export const RECTIFY_REVIEW_SCHEMA = object({
     },
 });
 
-export const RESTORE_DEFECT_KINDS = ['leftover', 'missing', 'seam', 'artefact'];
+export const RESTORE_DEFECT_KINDS = ['leftover', 'missing', 'seam', 'artefact', 'rounded-corner'];
 
 /** The kinds of foreign content the overlap role may report. */
 export const OVERLAP_DEFECT_KINDS = ['overlap', 'shared-frame', 'shared-bg'];
@@ -187,7 +187,11 @@ export const OVERLAP_SCHEMA = object({
 });
 
 export const RESTORE_SCHEMA = object({
-    verdict: { type: 'string', enum: ['clean', 'repair'], description: 'clean=usable, repair=needs fixes.' },
+    verdict: {
+        type: 'string',
+        enum: ['clean', 'repair', 'straighten'],
+        description: 'clean=the screen is whole, repair=the pixels need fixes, straighten=the pixels are whole and only the geometry is off.',
+    },
     assessment: { ...string, description: 'What you see and why.' },
     patches: {
         type: 'array',
@@ -202,6 +206,17 @@ export const RESTORE_SCHEMA = object({
             prompt: { ...string, description: 'Instruction for the image editor.' },
         }),
     },
+    geometry: object({
+        rotateDeg: {
+            type: 'number',
+            description: 'The tilt of the content in degrees: positive when the content runs downhill to the right, negative when it runs uphill, 0 when the content is level.',
+        },
+        scalePercent: {
+            type: 'number',
+            description: 'The size of the content relative to the truth in percent: positive when the content is too small and has to grow, negative when it is too big, 0 when the size is right.',
+        },
+        reason: { ...string, description: 'What makes you say so, in one sentence.' },
+    }),
 });
 
 export const RESTORE_VERIFY_SCHEMA = object({

@@ -109,6 +109,19 @@ function validateStage(id, section, fail) {
     }
     if ('review' in section && typeof section.review !== 'boolean') fail(`${where}.review: true | false`);
   }
+  if (id === 'reconstruct' && section.geometry != null) {
+    const geometry = section.geometry;
+    const whereGeometry = `${where}.geometry`;
+    if (!isRecord(geometry)) fail(`${whereGeometry} должен быть объектом`);
+    const known = defaults.stages.reconstruct.geometry;
+    for (const key of Object.keys(geometry)) {
+      if (!(key in known)) fail(`${whereGeometry}.${key}: неизвестное поле (допустимо: ${Object.keys(known).join(', ')})`);
+    }
+    if ('enabled' in geometry && typeof geometry.enabled !== 'boolean') fail(`${whereGeometry}.enabled: true | false`);
+    for (const key of ['maxRotateDeg', 'maxScalePercent', 'minImprovementDeg']) {
+      if (key in geometry && !(Number.isFinite(geometry[key]) && geometry[key] >= 0)) fail(`${whereGeometry}.${key}: число ≥ 0`);
+    }
+  }
   if (id === 'resolve') {
     if (typeof section.layers !== 'boolean') fail(`${where}.layers: true | false`);
     if ('maxLayers' in section && !(Number.isSafeInteger(section.maxLayers) && section.maxLayers >= 0)) {
