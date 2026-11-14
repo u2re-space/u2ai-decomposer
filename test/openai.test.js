@@ -411,7 +411,7 @@ test('the picture request goes to the next model when the first one refuses it',
             const model = JSON.parse(body).model;
             if (model === 'openai/gpt-image-2.6-sunburst') {
                 // The host does not serve this model — it is not the money of the account.
-                //res.writeHead(404).end(JSON.stringify({ detail: 'The model is not available here.' }));
+                res.writeHead(404).end(JSON.stringify({ detail: 'The model is not available here.' }));
                 return;
             }
             sendJson(res, { data: [{ b64_json: PNG_1PX.toString('base64') }] });

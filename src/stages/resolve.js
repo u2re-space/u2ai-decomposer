@@ -373,7 +373,7 @@ async function splitLayers({ root, outDir, target, config, roles, model, effort,
     }
     if (isSeedream55(layerModel)) {
         // The route of the layers is up, but no host of it has a key: the text role answers.
-        warnings.push('resolve: no host of the layer route has a key — the text role splits the screen instead');
+        warnings.push('resolve: no image backend of the layer route has a key — the text role splits the screen instead');
     }
     return await splitLayersWithDirector({ root, outDir, target, config, roles, model, effort, toolset, engine, warnings });
 }
@@ -416,7 +416,7 @@ async function splitLayersWithSeedream({ root, outDir, target, config, channels,
     }
 
     if (!channels.length) {
-        warnings.push('resolve: no host of the layer route is configured for the seedream layer split');
+        warnings.push('resolve: no image backend is configured for the seedream layer split');
         return { layers: [], frame: null, base: null };
     }
 

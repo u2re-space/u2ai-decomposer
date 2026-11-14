@@ -298,7 +298,7 @@ polled on the same host (`GET /v1/tasks/{task_id}`) until it is `completed`. The
 as transparent PNGs with a bounding box in the coordinates of the base picture.
 
 Without the key the run does not fail: the text role splits the screen instead, and the run says
-so (`no host of the layer route has a key — the text role splits the screen instead`).
+so (`no image backend of the layer route has a key — the text role splits the screen instead`).
 
 ### Config
 
