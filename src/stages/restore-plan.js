@@ -82,14 +82,18 @@ export function planFragment(patch, { frameWidth, frameHeight, margin = FRAGMENT
  * Three things make a patch unusable: it is not this kind of damage, it does not describe a region
  * of this frame, or it is so large that "repair" means "redraw the screen". Overlaps are dropped
  * rather than merged: two boxes over the same pixels ask the editor the same question twice, and the
- * second answer silently overwrites the first.
+ * second answer silently overwrites the first. The same holds for the regions that were repaired in
+ * an earlier pass: they are passed in as `taken` and are not repaired twice.
  * @param {object[]} patches the role's answer
- * @param {{ frameWidth: number, frameHeight: number, maxPatches?: number, kinds?: string[] }} options
- *   `kinds` is the list of defect kinds this caller accepts.
+ * @param {{ frameWidth: number, frameHeight: number, maxPatches?: number, kinds?: string[],
+ *   taken?: Array<{ x: number, y: number, width: number, height: number }> }} options
+ *   `kinds` is the list of defect kinds this caller accepts, `taken` the boxes already repaired.
  * @returns {{ patches: object[], rejected: Array<{ patch: object, reason: string }> }}
  * @ai.hint pure
  */
-export function pickPatches(patches = [], { frameWidth, frameHeight, maxPatches = 3, kinds = RESTORE_DEFECT_KINDS }) {
+export function pickPatches(patches = [], {
+    frameWidth, frameHeight, maxPatches = 3, kinds = RESTORE_DEFECT_KINDS, taken = [],
+}) {
     const accepted = [];
     const rejected = [];
     const area = Math.max(1, frameWidth * frameHeight);
@@ -125,6 +129,10 @@ export function pickPatches(patches = [], { frameWidth, frameHeight, maxPatches 
         }
         if (patch.prompt.length < 24) {
             rejected.push({ patch, reason: 'the instruction for the editor is too short to describe a repair' });
+            continue;
+        }
+        if (taken.some((done) => overlaps(done, patch))) {
+            rejected.push({ patch, reason: 'it overlaps a region that was repaired already' });
             continue;
         }
         if (accepted.some((done) => overlaps(done, patch))) {

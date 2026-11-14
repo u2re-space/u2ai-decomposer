@@ -235,6 +235,23 @@ is refused with a warning instead of being applied quietly.
   geometry: 01-home.png — tilt 3°, size 0% (2.9° → 0.4°, applied)
 ```
 
+### How many times the AI touches a screen
+
+The restorer may come back to the same screen, but only a few times: `stages.reconstruct.maxPasses`
+(three by default). A **pass** is the whole visit — the plan of the role and the repair of the
+regions it named — so a screen costs at most three plans and three rounds of editor calls.
+
+The first pass works on the **rectified** screen, the one the `rectify` stage produced, or on the
+crop of the reference when there is no rectified result. Every later pass works on the result of the
+repairs before it and is told which regions were repaired already, so the same box is never
+repaired twice — the second answer to the same question would silently overwrite the first.
+
+The editor itself is fed a fragment of the picture, and which picture that is depends on the model:
+the `gpt-image` line redraws what it is given, so it is handed the fragment of the **rectified**
+screen and never sees the pixels of an earlier repair; the `seedream` line keeps the pixels it is
+given, so it may work on the repaired result and finish the job on it. The answer is stitched into
+the working screen in either case.
+
 ### What a repair costs
 
 Every fragment the editor is asked to fix is a call to a picture model, and that call is the most
@@ -250,6 +267,10 @@ The **check comes before the next repair**. Every repaired fragment is shown to 
 side by side with the screen it replaces, and a repair the check refuses ends the screen there:
 the editor is not asked again for a screen that is already beyond repair. A screen that cannot be
 fixed costs one call, not three.
+
+The **number of passes is bounded**. The AI comes back to a screen at most
+`stages.reconstruct.maxPasses` times (three by default), and a pass that names nothing new — the
+screen is whole, or every region it names was repaired already — ends the screen there.
 
 ### What the run reports
 

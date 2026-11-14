@@ -225,6 +225,10 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'reconstruct.file':
                 if (verbose) console.log(`  restored: ${e.file}`);
                 break;
+            case 'reconstruct.start':
+                console.log(`  restoring: ${e.file} — pass ${e.pass ?? 1}`
+                    + `${e.patches ? `, ${e.patches} region(s)` : ''}`);
+                break;
             case 'reconstruct.geometry':
                 console.log(`  geometry: ${e.file} — tilt ${e.rotateDeg ?? 0}°, size ${e.scalePercent ?? 0}% `
                     + `(${e.before ?? 0}° → ${e.after ?? 0}°, ${e.status})`);
@@ -492,6 +496,10 @@ export function createRenderer({ verbose = false } = {}) {
                 break;
             case 'reconstruct.file':
                 if (verbose) say(`  restored: ${e.file}`);
+                break;
+            case 'reconstruct.start':
+                say(paint(`  restoring: ${e.file} — pass ${e.pass ?? 1}`
+                    + `${e.patches ? `, ${e.patches} region(s)` : ''}`, COLORS.dim));
                 break;
             case 'reconstruct.geometry':
                 say(paint(`  geometry: ${e.file} — tilt ${e.rotateDeg ?? 0}°, size ${e.scalePercent ?? 0}% `

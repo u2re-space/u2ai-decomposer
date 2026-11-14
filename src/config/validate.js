@@ -104,7 +104,7 @@ function validateStage(id, section, fail) {
     }
   }
   if (id === 'rectify' || id === 'reconstruct' || id === 'overlap') {
-    for (const key of ['maxTurns', 'maxSplitTurns', 'maxAttempts', 'boxPadding', 'maxPatches']) {
+    for (const key of ['maxTurns', 'maxSplitTurns', 'maxAttempts', 'maxPasses', 'boxPadding', 'maxPatches']) {
       if (key in section && !(Number.isSafeInteger(section[key]) && section[key] >= 0)) fail(`${where}.${key}: целое ≥ 0`);
     }
   }

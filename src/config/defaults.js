@@ -196,6 +196,11 @@ export const defaults = {
       enabled: true,
       /** Max AI repair attempts per lost detail. */
       maxAttempts: 2,
+      /**
+       * How many times the AI may work on one screen. A pass is the whole visit: the plan of the
+       * role and the repair of the regions it named. Three by default.
+       */
+      maxPasses: 3,
       /** Padding (px) around a lost-detail box before patching. */
       boxPadding: 16,
       /** Max regions of one screen that may be repaired in one pass. */

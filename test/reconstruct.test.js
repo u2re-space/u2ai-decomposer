@@ -11,7 +11,7 @@ import os from 'node:os';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import sharp from 'sharp';
 
-import { runReconstruct } from '../src/stages/reconstruct.js';
+import { runReconstruct, prefersStartPicture } from '../src/stages/reconstruct.js';
 import { EDITOR_FRAME, editorPrompt, pickPatches, planFragment } from '../src/stages/restore-plan.js';
 import { measureResidualSkewFromBytes } from '../src/image/skew.js';
 import { defaults, validateConfig } from '../src/config.js';
@@ -141,6 +141,36 @@ const twoPatchPlan = {
         },
     ],
 };
+
+/** The plan of the second pass: another region, not the one of the first pass. */
+const secondRegionPlan = {
+    verdict: 'repair',
+    assessment: 'the corner of the display is cut round',
+    patches: [twoPatchPlan.patches[1]],
+};
+
+/**
+ * A region next to the one of the first pass: it does not overlap it, but the fragment of the
+ * first repair reaches into it — that is what tells the two editor sources apart.
+ */
+const nearbyRegionPlan = {
+    verdict: 'repair',
+    assessment: 'a seam runs along the left of the screen',
+    patches: [{
+        kind: 'seam',
+        x: 50,
+        y: 50,
+        width: 40,
+        height: 30,
+        finding: 'a seam runs along the left of the screen',
+        prompt: 'remove the seam and continue the background of the screen without a break',
+    }],
+};
+
+/** A picture of one colour: what an editor that paints its fragment leaves behind. */
+const solid = async (r, g, b, width = 320, height = 240) => await sharp({
+    create: { width, height, channels: 3, background: { r, g, b } },
+}).png().toBuffer();
 
 // ---------------------------------------------------------------------------
 // The plan
@@ -431,6 +461,155 @@ test('a geometry correction that makes the screen worse is rolled back', async (
         assert.match(state.warnings.join('\n'), /rolled back/);
         assert.equal(state.restored.find((item) => item.to), undefined);
         assert.deepEqual(state.images, [SCREEN_REL]);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// The passes
+// ---------------------------------------------------------------------------
+
+test('the restorer comes back and repairs a region that is still broken', async () => {
+    const root = await workDirWith();
+    try {
+        const edits = [];
+        const client = mockClient(async (params) => {
+            edits.push(params);
+            return { images: [{ bytes: params.image.bytes, mime: 'image/png' }] };
+        });
+        const calls = [];
+        let plans = 0;
+        const roles = mockRoles((name) => {
+            if (name === 'restorerVerify') return { verdict: 'better', reason: 'the defect is gone' };
+            plans += 1;
+            return plans === 1 ? repairPlan : secondRegionPlan;
+        }, calls);
+        const state = stateFor(root, roles, { client });
+        state.config.stages.reconstruct.maxPasses = 2;
+        await runReconstruct(state, () => {});
+
+        assert.equal(edits.length, 2, 'the editor was asked once per pass');
+        const visits = calls.filter((call) => call.name === 'restorer');
+        assert.equal(visits.length, 2, 'the role came back to the screen');
+        assert.match(visits[1].params.text, /Pass 2 of 2/);
+        const repaired = state.restored.find((item) => item.to);
+        assert.ok(repaired, state.warnings.join('; '));
+        assert.equal(repaired.patches.length, 2);
+        assert.deepEqual(repaired.patches.map((patch) => patch.kind), ['leftover', 'rounded-corner']);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('a region that was repaired already is not repaired twice', async () => {
+    const root = await workDirWith();
+    try {
+        const edits = [];
+        const client = mockClient(async (params) => {
+            edits.push(params);
+            return { images: [{ bytes: params.image.bytes, mime: 'image/png' }] };
+        });
+        const roles = mockRoles((name) => (name === 'restorerVerify'
+            ? { verdict: 'better', reason: 'the defect is gone' }
+            : repairPlan));
+        const state = stateFor(root, roles, { client });
+        state.config.stages.reconstruct.maxPasses = 2;
+        await runReconstruct(state, () => {});
+
+        assert.equal(edits.length, 1, 'the editor was not asked about the same region again');
+        assert.match(state.warnings.join('\n'), /overlaps a region that was repaired already/);
+        const repaired = state.restored.find((item) => item.to);
+        assert.ok(repaired, state.warnings.join('; '));
+        assert.equal(repaired.patches.length, 1, 'the repair of the first pass is kept');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the gpt-image line works on the picture the stage started with, the seedream line on the repaired one', () => {
+    assert.equal(prefersStartPicture('openai/gpt-image-2.6-sunburst'), true);
+    assert.equal(prefersStartPicture('bytedance-seed/seedream-5-5'), false);
+});
+
+test('the stage works on the rectified screen, not on the crop', async () => {
+    const root = await workDirWith();
+    try {
+        const rectifiedRel = 'decomposition/rectified/01-home.png';
+        await mkdir(path.join(root, 'decomposition', 'rectified'), { recursive: true });
+        await writeFile(path.join(root, 'decomposition', 'rectified', '01-home.png'), await solid(200, 20, 20));
+        const calls = [];
+        const edits = [];
+        const client = mockClient(async (params) => {
+            edits.push(params);
+            return { images: [{ bytes: params.image.bytes, mime: 'image/png' }] };
+        });
+        const roles = mockRoles((name) => (name === 'restorerVerify'
+            ? { verdict: 'better', reason: 'the defect is gone' }
+            : repairPlan), calls);
+        const state = stateFor(root, roles, { client });
+        state.screens = [{ name: 'home', source: 'reference.png', subReference: rectifiedRel, subReferenceKind: 'rectified' }];
+        state.screensFiles = [{ rel: rectifiedRel, screen: 'home', kind: 'rectified', source: 'reference.png', note: '' }];
+        await runReconstruct(state, () => {});
+
+        const rectified = await readFile(path.join(root, 'decomposition', 'rectified', '01-home.png'));
+        const shown = calls[0].params.parts[0].image_url.split(',')[1];
+        assert.deepEqual(Buffer.from(shown, 'base64'), rectified, 'the role sees the rectified screen');
+        const stats = await sharp(edits[0].image.bytes).stats();
+        assert.ok(stats.channels[0].mean > 150 && stats.channels[2].mean < 60,
+            'the editor got a fragment of the rectified screen');
+        const repaired = state.restored.find((item) => item.to);
+        assert.equal(repaired.from, rectifiedRel);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the second pass of the gpt-image line never sees the pixels of the first repair', async () => {
+    const root = await workDirWith();
+    try {
+        const edits = [];
+        const client = mockClient(async () => ({ images: [{ bytes: await solid(20, 20, 220), mime: 'image/png' }] }));
+        let plans = 0;
+        const roles = mockRoles((name) => {
+            if (name === 'restorerVerify') return { verdict: 'better', reason: 'the defect is gone' };
+            plans += 1;
+            return plans === 1 ? repairPlan : nearbyRegionPlan;
+        });
+        const state = stateFor(root, roles, { client });
+        state.imageModel = 'openai/gpt-image-2.6-sunburst';
+        state.config.stages.reconstruct.maxPasses = 2;
+        await runReconstruct(state, () => {});
+
+        assert.equal(edits.length, 2, 'the editor was asked once per pass');
+        const stats = await sharp(edits[1].image.bytes).stats();
+        const diff = stats.channels[2].mean - stats.channels[0].mean;
+        assert.ok(diff < 10, `the fragment of the second pass carries no paint of the first (blue ${diff})`);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('the second pass of the seedream line works on the repaired screen', async () => {
+    const root = await workDirWith();
+    try {
+        const edits = [];
+        const client = mockClient(async () => ({ images: [{ bytes: await solid(20, 20, 220), mime: 'image/png' }] }));
+        let plans = 0;
+        const roles = mockRoles((name) => {
+            if (name === 'restorerVerify') return { verdict: 'better', reason: 'the defect is gone' };
+            plans += 1;
+            return plans === 1 ? repairPlan : nearbyRegionPlan;
+        });
+        const state = stateFor(root, roles, { client });
+        state.imageModel = 'bytedance-seed/seedream-5-5';
+        state.config.stages.reconstruct.maxPasses = 2;
+        await runReconstruct(state, () => {});
+
+        assert.equal(edits.length, 2, 'the editor was asked once per pass');
+        const stats = await sharp(edits[1].image.bytes).stats();
+        const diff = stats.channels[2].mean - stats.channels[0].mean;
+        assert.ok(diff > 30, `the fragment of the second pass carries the paint of the first (blue ${diff})`);
     } finally {
         await rm(root, { recursive: true, force: true });
     }
