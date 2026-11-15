@@ -43,6 +43,7 @@ import { runRectify, referenceFiles, opaqueShare, quadCorners, swapReferencePath
 import { runOverlap } from './overlap.js';
 import { editFragment, prefersStartPicture, verifyRepair } from './repair.js';
 import { editorPrompt, pickPatches, planFragment } from './restore-plan.js';
+import { scratchDir as scratchDirOf } from '../shared/scratch.js';
 
 /** Subdirectory of the work dir that holds the straightened references. */
 export const STRAIGHTENED_DIR = 'straightened';
@@ -339,7 +340,7 @@ async function repairCuts({
     }
 
     const outDir = path.join(root, workDir, REPAIRED_DIR);
-    const scratchRoot = path.join(root, workDir, '.repair');
+    const scratchRoot = path.join(scratchDirOf(state), 'repair');
     await mkdir(outDir, { recursive: true });
     /** The names the repaired screens took, so that two screens never share one file. */
     const usedNames = new Set();

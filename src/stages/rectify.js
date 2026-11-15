@@ -41,6 +41,7 @@ import { perspectiveRectify } from '../image/rectify.js';
 import { measureResidualSkew } from '../image/skew.js';
 import { imagePart } from '../openai/responses.js';
 import { sniffImage } from '../openai/images.js';
+import { scratchDir as scratchDirOf } from '../shared/scratch.js';
 
 /** Subdirectory of the work dir that holds the rectified copies. */
 export const RECTIFIED_DIR = 'rectified';
@@ -487,6 +488,10 @@ export function cropOfReference(file, references) {
  */
 export async function runRectify(state, notify = () => {}) {
     const { root, workDir, config, roles, model, effort, warnings, toolset } = state;
+    // The scratch of the run: the candidates of the attempts live in the house of the project,
+    // not in the delivery. The path is taken once — inside the loop the name `state` means the
+    // screen, not the run.
+    const scratchRoot = scratchDirOf(state);
     const references = referenceFiles(state, root);
     const screens = inputFiles(state, root);
     if (!references.length && !screens.length) {
@@ -508,7 +513,9 @@ export async function runRectify(state, notify = () => {}) {
 
     const outDir = path.join(root, workDir, RECTIFIED_DIR);
     await mkdir(outDir, { recursive: true });
-    toolset?.setWriteDirs?.([outDir]);
+    // The stage may write into its delivery and into the scratch of the run: the candidates of
+    // the attempts live in the house of the project, not in the delivery.
+    toolset?.setWriteDirs?.([outDir, scratchRoot]);
 
     const extraTools = toolset?.specsFor
         ? toolset.specsFor('rectifier', RECTIFIER_TOOLS)
@@ -673,7 +680,7 @@ export async function runRectify(state, notify = () => {}) {
         const reviewTheCuts = async () => {
             const reviewable = [...screens.values()].filter((state) => state.best && !state.reviewed);
             if (!review || !reviewable.length) return;
-            const scratch = path.join(outDir, '.try-review');
+            const scratch = path.join(scratchRoot, 'try-review');
             await mkdir(scratch, { recursive: true });
             const scratchRel = toPosix(path.relative(root, scratch));
             const cuts = reviewable.map((state) => ({ from: file.rel, to: state.best.rel, screen: state.label }));
@@ -796,9 +803,10 @@ export async function runRectify(state, notify = () => {}) {
             ));
             if (round > 1 && screens.size && !eligible.length) break;
 
-            // The candidates of this round live in a scratch directory inside the output
-            // directory: the file of an accepted screen is never overwritten by a later attempt.
-            const scratch = path.join(outDir, `.try-${round}`);
+            // The candidates of this round live in a scratch directory in the house of the
+            // project: the file of an accepted screen is never overwritten by a later attempt,
+            // and the delivery keeps the product alone.
+            const scratch = path.join(scratchRoot, `try-${round}`);
             await mkdir(scratch, { recursive: true });
             const scratchRel = toPosix(path.relative(root, scratch));
 

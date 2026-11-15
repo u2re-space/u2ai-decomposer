@@ -476,6 +476,68 @@ A host takes part in a batch only when the config says so:
 on for one run. A batch that the host refuses is not the end of the run: the requests of that
 batch go one by one after all.
 
+## The house of the project
+
+Every project has one directory of its own: `.ai/`. Everything a run makes that is not the
+product itself lives there, and nowhere else.
+
+```
+.ai/
+  tmp/<run-id>/     the state of the run: the scratch of the stages
+  assets/           the assets of the house
+  logs/api/         the log of the API calls
+  manifest.json     the contract of the project: what every system made and where it lies
+```
+
+The state of a run dies with the run: a new run never reads the state of the old one, and the
+old one never gets in the way of the new one. The `output.work` of the config may move the
+state elsewhere, but there is only one path, and it is computed in one place — the house.
+
+The delivery stays where the user expects it: `decomposition/` with the directory of every
+stage inside it, and `decomposition.json` next to it. The house keeps the state and the
+contract, and it does not move the delivery. The scratch of the stages — the candidates of a
+projection, the fragment of a repair, the band of an extension — is the state of the run, not
+a part of the product: it lives in `.ai/tmp/<run-id>/` and dies with the run. The delivery
+keeps the product alone.
+
+The contract is how the systems of the house find each other. Every system signs its own part
+of `.ai/manifest.json` and never touches the part of another one:
+
+```json
+{
+  "manifestVersion": 1,
+  "updatedAt": "2026-11-15T03:41:02.113Z",
+  "systems": {
+    "decomposer": {
+      "delivery": "decomposition/",
+      "artifacts": {
+        "decomposition": "decomposition.json",
+        "manifest": "decomposition/manifest.json",
+        "screens": "decomposition/screens/",
+        "extended": "decomposition/extended/",
+        "rectified": "decomposition/rectified/",
+        "restored": "decomposition/restored/",
+        "overlap": "decomposition/overlap/",
+        "repaired": "decomposition/repaired/",
+        "straightened": "decomposition/straightened/"
+      },
+      "runId": "mwf29yjp-89134d",
+      "screens": 3,
+      "updatedAt": "2026-11-15T03:40:58.002Z"
+    }
+  }
+}
+```
+
+The paths are relative to the project and with forward slashes: the contract is read on another
+machine and another system, and the path has to mean the same thing there. A run reads the
+contract first and only then the old paths of the config, so a delivery that moved is still
+found.
+
+The files of the house are written whole: the bytes go to a file next to the target and the
+target is replaced by a rename. A reader never sees half of a file, and a run that dies in the
+middle leaves the old file and not a broken one.
+
 ### Config
 
 - File: `~/.ai-decompose/config.json`
@@ -483,6 +545,7 @@ batch go one by one after all.
 - Substitutions: `{{env:NAME}}`
 - Backends, imagesBackends and layerBackends pools
 - fallback.models: the models that get a picture request when every host refused the model
+- output.work: where the state of a run goes: `.ai/tmp/` by default. It dies with the run.
 
 The section of the resolve stage:
 

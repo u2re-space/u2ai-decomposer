@@ -55,6 +55,7 @@ import { imagePart } from '../openai/responses.js';
 import { BATCH_SUBMITTED } from '../openai/batch.js';
 import { FRAGMENT_MARGIN, editorPrompt, pickPatches, planFragment } from './restore-plan.js';
 import { editFragment, verifyRepair, prefersStartPicture } from './repair.js';
+import { scratchDir as scratchDirOf } from '../shared/scratch.js';
 
 export { prefersStartPicture };
 
@@ -534,7 +535,7 @@ export async function runReconstruct(state, notify = () => {}) {
 
     const outDir = path.join(root, workDir, RESTORED_DIR);
     await mkdir(outDir, { recursive: true });
-    const scratch = path.join(root, workDir, '.restore');
+    const scratch = path.join(scratchDirOf(state), 'restore');
 
     const usedNames = new Set();
 

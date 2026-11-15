@@ -2,22 +2,25 @@
  * @file src/shared/pipeline.js
  * @module shared/pipeline
  * @purpose Pipeline orchestrator: runs stages in order, passes artifacts between them.
- * @depends node:path, node:fs/promises, shared/manifest, shared/resume
- * @exports STAGES, runPipeline
+ * @depends node:path, node:fs/promises, node:crypto, shared/manifest, shared/resume, shared/house
+ * @exports STAGES, runPipeline, newRunId
  * @ai.tags pipeline, stages
  * @ai.hint keep
  */
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { createRoleRunner } from '../roles/index.js';
 import { createToolset } from '../agent/tools.js';
 import { loadSkills } from '../agent/skills.js';
 import { connectMcpServers } from '../agent/mcp.js';
 import { STAGE_DEFS, STAGE_DIRS, STAGE_ROLES } from '../stages/index.js';
 import { DECOMPOSITION_FILE } from '../stages/resolve.js';
+import { publishDelivery } from '../stages/publish.js';
 import { BATCH_SUBMITTED } from '../openai/batch.js';
 import { saveStageManifest } from './manifest.js';
 import { resumeFromWorkDir } from './resume.js';
+import { runStateDir } from './house.js';
 
 /**
  * Ordered stage definitions.
@@ -28,6 +31,19 @@ export const STAGES = STAGE_DEFS.map((stage) => ({
     label: stage.label,
     run: stage.run,
 }));
+
+/**
+ * The id of a run: the time and a few random bytes, in a name a person can read.
+ *
+ * The id names the state of the run inside the house of the project: `.ai/tmp/<run-id>/`.
+ * The state dies with the run, and a new run never reads the state of the old one.
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function newRunId() {
+    return `${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
+}
 
 /**
  * Execute the pipeline stages in order.
@@ -71,6 +87,13 @@ export async function runPipeline({
     });
     const workDir = path.join(outDir, 'decomposition');
     if (!dryRun) await mkdir(workDir, { recursive: true });
+
+    // The state of the run lives in the house of the project — `.ai/tmp/<run-id>/` — and dies
+    // with the run. The scratch of the stages lives there too: a scratch directory is the
+    // state of a run, not a part of the delivery.
+    const runId = newRunId();
+    const scratchDir = runStateDir(root, runId, config);
+    if (!dryRun) await mkdir(scratchDir, { recursive: true });
 
     // Filter stages to run.
     const selected = requestedStages ?? STAGES.map((stage) => stage.id);
@@ -120,6 +143,9 @@ export async function runPipeline({
         references: [...images],
         workDir,
         outDir,
+        // The id of the run and the directory of its state: the scratch of the stages.
+        runId,
+        scratchDir,
         config,
         client,
         roles,
@@ -153,6 +179,14 @@ export async function runPipeline({
         failed = await runStages(toRun, state, notify);
     } finally {
         for (const connection of mcp) await connection.close().catch(() => {});
+    }
+
+    // The contract of the project: what this run made and where it lies. The other systems
+    // of the house read it to find the work of this one.
+    try {
+        await publishDelivery(root, config, state);
+    } catch (cause) {
+        state.warnings.push(`The contract of the project was not written: ${cause?.message ?? cause}`);
     }
 
     return { output: state.decomposition, outputPath: state.outputPath ?? null, warnings: state.warnings, failed };

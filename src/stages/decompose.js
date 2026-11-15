@@ -9,7 +9,7 @@
  * @ai.hint keep
  */
 import path from 'node:path';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { DECOMPOSER_INLINE_SCHEMA, DECOMPOSER_SCHEMA } from '../agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 import { collectSubReferences, decompositionReport, SCREENS_DIR } from '../agent/decomposition.js';
@@ -19,6 +19,7 @@ import { imagePart } from '../openai/responses.js';
 import { sniffImage } from '../openai/images.js';
 import { toPosix } from '../agent/paths.js';
 import { cropScreens, planScreens } from './decompose-screens.js';
+import { writeFileAtomic } from '../shared/house.js';
 
 /** The tools the decomposer may call when it writes the screens itself. */
 export const AGENT_TOOLS = ['view_image', 'crop_image', 'split_image', 'compare_images', 'correct_perspective'];
@@ -263,7 +264,7 @@ For a rectified or regenerated view, run compare_images against the source.`;
     if (files.length) state.images = files.map((file) => file.rel);
 
     const jsonPath = path.join(workRoot, 'decompose.json');
-    await writeFile(jsonPath, JSON.stringify(decomposition, null, 2));
+    await writeFileAtomic(jsonPath, JSON.stringify(decomposition, null, 2));
 
     notify({
         type: 'decompose.screens',

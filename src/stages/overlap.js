@@ -32,6 +32,7 @@ import { imageModelFor, sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
 import { editorPrompt, pickPatches, planFragment } from './restore-plan.js';
 import { editFragment, verifyRepair } from './repair.js';
+import { scratchDir as scratchDirOf } from '../shared/scratch.js';
 
 /** Directory under the work directory where the cleaned copies are written. */
 export const OVERLAP_DIR = 'overlap';
@@ -113,7 +114,7 @@ export async function runOverlap(state, notify = () => {}) {
 
     const outDir = path.join(root, workDir, OVERLAP_DIR);
     await mkdir(outDir, { recursive: true });
-    const scratch = path.join(root, workDir, '.overlap');
+    const scratch = path.join(scratchDirOf(state), 'overlap');
 
     const extraTools = toolset?.specsFor
         ? toolset.specsFor('overlap', OVERLAP_TOOLS)

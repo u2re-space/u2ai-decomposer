@@ -21,6 +21,7 @@ import {
 import { imageModelFor, sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
 import { EXTEND_SCHEMA } from '../agent/schemas.js';
+import { scratchDir as scratchDirOf } from '../shared/scratch.js';
 
 /** The directory under the work directory where the extended canvas is written. */
 export const EXTENDED_DIR = 'extended';
@@ -361,7 +362,8 @@ export async function runExtension(state, notify = () => {}) {
 
     const workRoot = path.resolve(root, workDir);
     const extDir = path.join(workRoot, EXTENDED_DIR);
-    const scratchDir = path.join(workRoot, '.tmp', 'extend');
+    // The scratch of the stage lives in the house of the project, not in the delivery.
+    const scratchDir = path.join(scratchDirOf(state), 'extend');
     await mkdir(extDir, { recursive: true });
     await mkdir(scratchDir, { recursive: true });
 

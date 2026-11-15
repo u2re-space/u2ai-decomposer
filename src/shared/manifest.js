@@ -16,9 +16,10 @@
  */
 
 import path from 'node:path';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { toPosix } from '../agent/paths.js';
 import { screenNameOf } from './names.js';
+import { writeFileAtomic } from './house.js';
 
 /** The name of the manifest inside the work directory. */
 export const MANIFEST_FILE = 'manifest.json';
@@ -116,7 +117,8 @@ export async function readManifest(workDir) {
  */
 export async function writeManifest(workDir, manifest) {
     await mkdir(workDir, { recursive: true });
-    await writeFile(path.join(workDir, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+    // The manifest of the delivery is written whole: a reader never sees half of it.
+    await writeFileAtomic(path.join(workDir, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 /**

@@ -122,6 +122,11 @@ export function createFileSystem({ root, backend, limits = {}, messages = {} } =
 
     /**
      * Write a file as text.
+     *
+     * The write is atomic: the bytes go to a file next to the target and the target is
+     * replaced by a rename. A reader never sees half of a file, and a run that dies in the
+     * middle leaves the old file and not a broken one.
+     *
      * @param {string} relative
      * @param {string} text
      * @param {{ createParents?: boolean }} [options]
@@ -137,8 +142,34 @@ export function createFileSystem({ root, backend, limits = {}, messages = {} } =
         if (createParents && typeof backend.mkdir === 'function') {
             await backend.mkdir(path.dirname(abs), { recursive: true });
         }
-        await backend.writeFile(abs, data);
+        await writeAtomic(abs, data);
         return { path: rel, bytes: data.byteLength, created: !before };
+    };
+
+    /**
+     * Write the bytes of a file whole: write next to it, rename over it.
+     *
+     * A backend without `rename` gets a plain write: it is better a whole file than none.
+     * @param {string} abs the absolute path of the file
+     * @param {Uint8Array} data the bytes
+     * @returns {Promise<void>}
+     */
+    const writeAtomic = async (abs, data) => {
+        if (typeof backend.rename !== 'function') {
+            await backend.writeFile(abs, data);
+            return;
+        }
+        const stamp = `${process.pid.toString(36)}-${Date.now().toString(36)}`;
+        const temporary = path.join(path.dirname(abs), `.${path.basename(abs)}.tmp-${stamp}`);
+        try {
+            await backend.writeFile(temporary, data);
+            await backend.rename(temporary, abs);
+        } catch (error) {
+            if (typeof backend.unlink === 'function') {
+                await backend.unlink(temporary).catch(() => {});
+            }
+            throw error;
+        }
     };
 
     /**

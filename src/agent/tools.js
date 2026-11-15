@@ -2,18 +2,20 @@
  * @file src/agent/tools.js
  * @purpose The executor of the tools: it runs the calls the model asks for inside the working
  *          directory and answers with a short text the model can read.
- * @depends image/raster, image/crop, openai/images, agent/tool-specs, agent/mcp, agent/paths
+ * @depends image/raster, image/crop, openai/images, agent/tool-specs, agent/mcp, agent/paths,
+ *   shared/house
  * @exports createToolset, toolSpecs, enabledToolNames
  * @ai.hint keep
  * @ai.hint legacy-0.2
  */
 import path from 'node:path';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { rasterCrop, rasterInfo, rasterCompare, rasterSplit } from '../image/raster.js';
 import { clampRect, cropRect } from '../image/crop.js';
 import { sniffImage } from '../openai/images.js';
 import { toolSpecs as buildSpecs } from './tool-specs.js';
 import { isInside, resolveInside } from './paths.js';
+import { writeFileAtomic } from '../shared/house.js';
 
 export { toolSpecs, enabledToolNames } from './tool-specs.js';
 
@@ -171,7 +173,7 @@ export function createToolset({ root, config, client, role = null, mcp = [], wri
                 });
                 if (images?.length) {
                     const target = await writePath(args.output ?? 'generated.png');
-                    await writeFile(target.abs, images[0].bytes);
+                    await writeFileAtomic(target.abs, images[0].bytes);
                     return `Generated → ${target.rel}`;
                 }
                 return 'Generation returned empty';
@@ -190,7 +192,7 @@ export function createToolset({ root, config, client, role = null, mcp = [], wri
                     const parsed = path.parse(located.abs);
                     const fallback = path.join(parsed.dir, `${parsed.name}-edited.png`);
                     const target = await writePath(args.output ?? fallback);
-                    await writeFile(target.abs, images[0].bytes);
+                    await writeFileAtomic(target.abs, images[0].bytes);
                     return `Edited → ${target.rel}`;
                 }
                 return 'Edit returned empty';
@@ -198,7 +200,8 @@ export function createToolset({ root, config, client, role = null, mcp = [], wri
             case 'write_file': {
                 const target = await writePath(args.path);
                 await mkdir(path.dirname(target.abs), { recursive: true });
-                await writeFile(target.abs, args.content);
+                // The file of the model appears whole: a reader never sees half of it.
+                await writeFileAtomic(target.abs, args.content);
                 return `Written ${target.rel}`;
             }
             case 'read_file': {

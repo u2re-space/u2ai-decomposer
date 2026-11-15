@@ -1343,6 +1343,46 @@ planned.md (RU). Проверка: `npm test` — 277 тестов, все пр�
 
 ---
 
+## 37. Закон дома: где живёт сгенерированное (step-c8) — ✅ ЗАВЕРШЁН
+
+Декомпозер держал временное рядом с результатом: `decomposition/.repair`, `decomposition/.restore`,
+`decomposition/.overlap`, `decomposition/.tmp/extend`, а кандидаты попыток выпрямления —
+`decomposition/rectified/.try-<round>`. Поставка — это продукт, и временное в ней мешает:
+потомок читает каталог стадии и видит чужие попытки.
+
+- [x] `src/shared/house.js` — закон дома, общий для всех пакетов дома, побайтово одинаковый:
+      `.ai/tmp/<run-id>/` — состояние прогона (умирает с прогоном), `.ai/assets/` — ассеты,
+      `.ai/logs/` — логи API, `.ai/manifest.json` — контракт проекта
+- [x] `src/shared/scratch.js` — путь scratch считается в одном месте; состояние, собранное
+      руками, получает тот же путь от дома
+- [x] `src/shared/pipeline.js` — у прогона появился id (`newRunId`) и каталог состояния
+      `.ai/tmp/<run-id>/`; конец прогона подписывает контракт проекта, ошибка публикации —
+      предупреждение, а не падение прогона
+- [x] `src/stages/extension.js` — scratch расширения (`extend`) ушёл в дом
+- [x] `src/stages/reconstruct.js` — scratch починки (`restore`) ушёл в дом
+- [x] `src/stages/overlap.js` — scratch чистки (`overlap`) ушёл в дом
+- [x] `src/stages/rectify-ai.js` — scratch починки геометрии (`repair`) ушёл в дом
+- [x] `src/stages/rectify.js` — кандидаты попыток (`try-review`, `try-<round>`) ушли в дом;
+      замок на запись модели (`setWriteDirs`) открыт и на каталог поставки, и на каталог
+      состояния — иначе модель не смогла бы записать кандидата
+- [x] `src/stages/publish.js` — конец прогона подписывает секцию `decomposer` контракта:
+      поставка (`decomposition/`), лист декомпозиции, манифест поставки, каталоги стадий
+      (`screens`, `extended`, `rectified`, `restored`, `overlap`, `repaired`, `straightened`)
+- [x] `src/config/defaults.js` — `output.work` → `./.ai/tmp`; `src/config/validate.js` —
+      `output.work` проверяется как строка
+- [x] Атомарные записи: `src/access/fs.js` (слой доступа), `src/agent/tools.js` (файлы
+      модели), `src/shared/manifest.js`, `src/stages/decompose.js`, `src/stages/resolve.js` —
+      файл появляется целиком, временного файла не остаётся
+- [x] `test/house.test.js` — 15 тестов: путь состояния прогона (и его увод конфигурацией), дом
+      и его каталоги, путь файла проекта, scratch, контракт (запись, чтение, сломанный
+      контракт, чужая секция), поиск чужой работы по контракту, атомарная запись, подпись
+      поставки, подпись контракта в конце прогона
+- [x] README (EN) — раздел «The house of the project», ручка `output.work` в разделе о
+      конфиге
+- [x] Проверка: `npm test` — 294 теста, все проходят
+
+---
+
 ## Порядок работы и зависимости шагов
 
 ```

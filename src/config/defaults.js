@@ -303,8 +303,14 @@ export const defaults = {
     },
   },
 
-  /** Where pipeline artifacts are written, relative to cwd. */
-  output: { dir: './decomposition', file: './decomposition.json' },
+  /**
+   * Where pipeline artifacts are written, relative to cwd.
+   *
+   * `dir` is the delivery of the run: it stays where the user expects it. `work` is the state
+   * of the run: it lives in the house of the project (`.ai/tmp/`) and dies with the run. The
+   * path is computed in one place — `shared/house.js`.
+   */
+  output: { dir: './decomposition', file: './decomposition.json', work: './.ai/tmp' },
 
   // --- roles ----------------------------------------------------------------
   /**

@@ -261,7 +261,7 @@ export function validateConfig(config) {
   for (const id of ENUMS.stages) validateStage(id, c.stages[id], fail);
 
   if (!isRecord(c.output)) fail('output должен быть объектом');
-  for (const key of ['dir', 'file']) {
+  for (const key of ['dir', 'file', 'work']) {
     if (typeof c.output[key] !== 'string' || !c.output[key].trim()) fail(`output.${key}: непустая строка`);
   }
 

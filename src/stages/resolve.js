@@ -42,6 +42,7 @@ import { rasterCrop, rasterFitToBox, rasterInfo } from '../image/raster.js';
 import { downscaleToMaxSide } from '../image/sizing.js';
 import { sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
+import { writeFileAtomic } from '../shared/house.js';
 import {
     SEEDREAM_INPUT_MAX_BYTES, SEEDREAM_INPUT_MAX_PIXELS, SEEDREAM_MODEL, decomposeLayers,
     downloadImageBytes, isSeedream55, parseLayerDecomposition,
@@ -298,7 +299,8 @@ export async function runResolve(state, notify = () => {}) {
     // split is slow or fails, and the screens of the decomposition can be read while it runs.
     const jsonPath = path.join(root, outDir, DECOMPOSITION_FILE);
     await mkdir(path.dirname(jsonPath), { recursive: true });
-    await writeFile(jsonPath, `${JSON.stringify(resolved, null, 2)}\n`);
+    // The sheet of the decomposition is written whole: a reader never sees half of it.
+    await writeFileAtomic(jsonPath, `${JSON.stringify(resolved, null, 2)}\n`);
     state.decomposition = resolved;
     state.outputPath = jsonPath;
     notify({
@@ -342,7 +344,7 @@ export async function runResolve(state, notify = () => {}) {
         }
     }
 
-    await writeFile(jsonPath, `${JSON.stringify(resolved, null, 2)}\n`);
+    await writeFileAtomic(jsonPath, `${JSON.stringify(resolved, null, 2)}\n`);
 
     notify({
         type: 'resolve.done',

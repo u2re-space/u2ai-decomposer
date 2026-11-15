@@ -180,7 +180,7 @@ test('the stage projects the corners itself when the role wrote no file', async 
     }
 });
 
-test('the rectifier role gets the projection tool and the output directory', async () => {
+test('the rectifier role gets the projection tool and the scratch of the run', async () => {
     const root = await workDirWith();
     try {
         const calls = [];
@@ -194,7 +194,9 @@ test('the rectifier role gets the projection tool and the output directory', asy
         for (const forbidden of ['crop_image', 'write_file', 'generate_image', 'edit_image']) {
             assert.ok(!names.includes(forbidden), `${forbidden} is not geometry`);
         }
-        assert.match(calls[0].params.text, /decomposition\/rectified/);
+        // The candidates of the attempts live in the house of the project, not in the delivery.
+        assert.match(calls[0].params.text, /\.ai\/tmp\//);
+        assert.doesNotMatch(calls[0].params.text, /decomposition\/rectified/);
     } finally {
         await rm(root, { recursive: true, force: true });
     }
