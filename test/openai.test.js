@@ -16,6 +16,7 @@ import { outOfCredit } from '../src/openai/errors.js';
 import { fallbackChain, fallbackModels, withModelFallback } from '../src/openai/fallback.js';
 import { getModelProfile, snapEffort, contextBytes } from '../src/model/profiles.js';
 import { toChatBody, fromChatCompletion, responsesRouteUnsupported } from '../src/openai/chat.js';
+import { defaults } from '../src/config/defaults.js';
 
 /** A 1×1 PNG, used where the answer of the images API is checked. */
 const PNG_1PX = Buffer.from(
@@ -199,6 +200,33 @@ test('model profiles clamp the effort and resolve the context budget', () => {
     assert.equal(contextBytes('small', profile), 16 * 1024);
     assert.equal(contextBytes('auto', profile), profile.window);
     assert.equal(contextBytes(2048, profile), 2048);
+});
+
+test('the Gemini is the alternative to the Kimi and the Kimi is the fallback', () => {
+    const gemini = getModelProfile('google/gemini-4-hydrogen');
+    assert.equal(gemini.window, 4_194_304, '1M tokens of context');
+    assert.equal(gemini.maxOutput, 1_048_576, 'the continuation decodes up to 1M tokens');
+    assert.equal(gemini.ceiling, 'xhigh');
+    assert.equal(snapEffort('none', gemini), 'low', 'the card of the vendor has no none');
+    assert.equal(snapEffort('xhigh', gemini), 'xhigh');
+
+    // The Kimi is tuned for the speed of the answer: the ceiling is `medium`.
+    const kimi = getModelProfile('moonshotai/kimi-k3.1-pro');
+    assert.equal(kimi.ceiling, 'medium');
+    assert.equal(snapEffort('high', kimi), 'medium');
+    assert.equal(snapEffort('none', kimi), 'none', 'the reasoning may be turned off');
+});
+
+test('the chain of the house starts with the Kimi', () => {
+    assert.deepEqual(
+        fallbackChain(defaults, 'google/gemini-4-hydrogen'),
+        ['google/gemini-4-hydrogen', 'moonshotai/kimi-k3.1-pro', 'minimax/minimax-m3.1-flash'],
+    );
+    // The picture model keeps its own chain.
+    assert.deepEqual(
+        fallbackChain(defaults, 'openai/gpt-image-2.6-sunburst'),
+        ['openai/gpt-image-2.6-sunburst', 'bytedance-seed/seedream-5-5'],
+    );
 });
 
 test('retryDelayMs waits longer on a rate limit', () => {

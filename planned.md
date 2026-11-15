@@ -1319,6 +1319,30 @@ planned.md (RU). Проверка: `npm test` — 277 тестов, все пр�
 
 ---
 
+## 36. Gemini 4 Hydrogen вместо kimi, kimi — как fallback (step-c7) — ✅ ЗАВЕРШЁН
+
+Карточка модели `google/gemini-4-hydrogen` на RouterAI (ноябрь 2026): 1M токенов контекста,
+до 1M токенов выхода с продолжением, уровни усилия `low|medium|high|xhigh`. Kimi остаётся
+моделью-фолбэком, а Gemini — основной альтернативой.
+
+Живые пробы шлюза (2026-11-15): `POST /v1/responses` с `text.format` (json_schema) → 200 и
+ответ по схеме; с инструментом → 200 и `function_call`; с `reasoning.effort=xhigh` → 200 и
+305 reasoning-токенов; `POST /v1/chat/completions` с `response_format` → 200 и ответ по
+схеме ⇒ Gemini работает и в Responses, и в Chat Completions.
+
+- `src/model/profiles.js` — профиль `google/gemini-4-hydrogen`: окно 4 194 304 байта (1M
+  токенов), выход 1 048 576, потолок `xhigh`, лестница `low|medium|high|xhigh`; профиль kimi
+  приведён к реальному (потолок `medium`, лестница `none|low|medium` — под скорость ответа);
+  окно и выход minimax исправлены по карточке (4 MiB и 524K)
+- `src/config/defaults.js` — цепочка фолбэков: у Gemini первым идёт kimi, у kimi — minimax;
+  модель по умолчанию остаётся minimax (kimi в пакете не был основной моделью)
+- `test/openai.test.js` — профиль Gemini, срез усилия, цепочка дома; цепочка картинки не
+  изменилась
+- README (EN): таблица моделей, цепочка фолбэков
+- Проверка: `npm test` — 279 тестов, все проходят
+
+---
+
 ## Порядок работы и зависимости шагов
 
 ```

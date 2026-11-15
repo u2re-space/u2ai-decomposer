@@ -11,7 +11,7 @@ import { ENUMS } from './constants.js';
 export const defaults = {
   // --- API -----------------------------------------------------------------
   /** Text model for the role agents. */
-  model: 'minimax/minimax-m3.1-flash',//'moonshotai/kimi-k3.1-pro',
+  model: 'minimax/minimax-m3.1-flash',
   /** Picture model for generate/edit tools and the reconstruct stage. */
   imageModel: 'openai/gpt-image-2.6-sunburst',
   /** Endpoint of both APIs; backends[] below can override it per route. */
@@ -79,13 +79,17 @@ export const defaults = {
    * The models to try when the picture model refuses the request — no balance, no route.
    * Key: the model that failed, value: the list of models that get the request next.
    * The hosts of `imagesBackends` are tried first; a model of this list is the next step.
+   *
+   * The chain of the house is the Kimi: it answers with the reasoning off in a fraction of the
+   * time, so a run that met a refusal keeps going.
    */
   fallback: {
     enabled: true,
     models: {
       'openai/gpt-image-2.6-sunburst': ['bytedance-seed/seedream-5-5'],
-      "moonshotai/kimi-k3.1-pro": ["minimax/minimax-m3.1-flash"],
-      "minimax/minimax-m3.1-flash": []
+      'google/gemini-4-hydrogen': ['moonshotai/kimi-k3.1-pro', 'minimax/minimax-m3.1-flash'],
+      'moonshotai/kimi-k3.1-pro': ['minimax/minimax-m3.1-flash'],
+      'minimax/minimax-m3.1-flash': []
     },
   },
 

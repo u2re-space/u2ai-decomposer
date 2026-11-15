@@ -175,6 +175,7 @@ When every host refuses the model — no balance, no route — the request goes 
     "enabled": true,
     "models": {
       "openai/gpt-image-2.6-sunburst": ["bytedance-seed/seedream-5-5"],
+      "google/gemini-4-hydrogen": ["moonshotai/kimi-k3.1-pro", "minimax/minimax-m3.1-flash"],
       "moonshotai/kimi-k3.1-pro": ["minimax/minimax-m3.1-flash"],
       "minimax/minimax-m3.1-flash": []
     }
@@ -186,6 +187,25 @@ The key is the model that failed, the value is the list of models that get the r
 list works for the text route as well as for the picture route, so a run survives the loss of the
 host that served the role. The run reports every step of the chain: `the model … failed — trying
 …`.
+
+The chain of the house is the Kimi: it answers with the reasoning off in a fraction of the time,
+so a run that met a refusal keeps going. The Kimi is the fallback of the Gemini and of every
+other text model.
+
+The profiles of the text models are tuned by the cards of the gateway (RouterAI, November 2026)
+and by the live answers of it:
+
+| Model | Context | Output | Ceiling | Ladder |
+|---|---|---|---|---|
+| `google/gemini-4-hydrogen` | 1M tokens (4 MiB) | 1M | `xhigh` | `low`, `medium`, `high`, `xhigh` |
+| `minimax/minimax-m3.1-flash` | 1M tokens (4 MiB) | 524K | `xhigh` | `low`, `medium`, `high`, `xhigh` |
+| `moonshotai/kimi-k3.1-pro` | 1M tokens (4 MiB) | 944K | `medium` | `none`, `low`, `medium` |
+
+The Gemini decodes up to 1M tokens with the continuation and takes the effort up to `xhigh`; the
+card of the vendor names the four levels of its effort and has no `none`, so the reasoning off is
+raised to `low`. The Kimi keeps the reasoning off without a refusal and answers in a fraction of
+the time, so `none` stays on its ladder — the levels above `medium` cost the same seconds, and
+`medium` is its ceiling.
 
 The hosts themselves are listed in the config, and every one of them may name the environment
 variable with its key:
