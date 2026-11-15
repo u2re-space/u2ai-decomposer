@@ -19,7 +19,7 @@
   },
   "scripts": {
     "start": "node bin/ai-decompose.js",
-    "test": "node --test --test-timeout=60000 \"test/*.test.js\""
+    "test": "node --test --test-timeout=60000 --import ./test/offline-guard.js \"test/*.test.js\""
   },
   "files": [
     "bin",

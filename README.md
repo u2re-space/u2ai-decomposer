@@ -585,6 +585,16 @@ the model thinks, and a picture comes in one piece, so the image route gets a lo
 window. The env names are `AI_DECOMPOSE_TIMEOUT_MS`, `AI_DECOMPOSE_IMAGE_TIMEOUT_MS` and
 `AI_DECOMPOSE_STREAMING`.
 
+## Development
+
+```bash
+npm test               # the whole suite, offline
+npm pack --dry-run     # what the package would publish
+```
+
+The suite is offline: `test/offline-guard.js` refuses every address outside the machine, so
+a test that reaches the outside fails fast instead of spending money.
+
 ## Lineage
 
 The phases were ported from the monolith `Universal-AI` (0.2.xx), where they lived in
