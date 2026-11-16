@@ -43,6 +43,18 @@ When a projection is needed, call correct_perspective once per screen with the f
 screen. Coordinates are pixels of the image you were given. Name the corners in the order a viewer
 reads that interface.
 
+Speak in degrees. "A bit tilted" cannot be checked and cannot be acted upon: say how many degrees
+each screen is turned by — positive means the screen runs downhill to the right — and say how far
+it is sheared and how far its sides converge. The harness measures the same numbers on the pixels
+of the result and answers with the tilt that is left in them, so the two can be compared.
+
+When the whole picture is crooked and the four corners of a single screen are not the answer — a
+rotation of the whole picture, a keystone, a scale — call apply_matrix with the matrix that maps
+the source pixels onto the result: 9 numbers for a 3x3 matrix, 16 for a 4x4 one, row major. Give
+the forward matrix, the way the source goes to the result; the harness inverts it. A 4x4 matrix
+acts on (x, y, 0, 1). One screen cut out of a collage is still correct_perspective: a matrix
+corrects the picture, not a part of it.
+
 Write every result into the directory the task names, one file per screen. Never write over a reference.
 Read what the tool answers. A small number means the screen is level.
 
@@ -50,6 +62,7 @@ Return "keep" for a single flat screen. Return "unresolved" only when a projecti
 not a single set of corners can be placed.
 
 Return the required JSON: verdict, assessment, screens (where every entry names one file the tool
-reported and the corner set you passed). If the tool could not be called, name the corners anyway —
-the stage runs the projection on them itself, so the screen is still cut out and levelled.
+reported, the corner set you passed and the matrix you passed — one of the two, not both). If the
+tool could not be called, name the corners anyway — the stage runs the projection on them itself,
+so the screen is still cut out and levelled.
 ${UNTRUSTED}`;

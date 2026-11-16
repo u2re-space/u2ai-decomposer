@@ -58,7 +58,16 @@ Pipeline stages:
   rectify         Un-rotate / recover projection, cut collages into screens.
                   The role checks its own cut and cuts it again when a screen
                   lost its edges.
-                  The mode is the plan's decision: geometry places the corners and
+                  The role speaks in degrees: how far a screen is turned
+                  (rotation), how far it is sheared (skew) and how far its
+                  sides converge (keystone). The harness measures the same
+                  numbers on the pixels of the result and keeps the copy only
+                  when the tilt really went down.
+                  One screen out of a picture is corrected with its four
+                  corners; the whole picture is corrected with a projective
+                  matrix of 9 (3x3) or 16 (4x4) numbers, row major, source to
+                  destination — the apply_matrix tool. The mode is the plan's
+                  decision: geometry places the corners and
                   projects the pixels; ai-mode lets the picture model straighten the
                   reference first, the cut is still made by the geometry, the broken
                   parts are repaired by fragments, and the content of the neighbouring

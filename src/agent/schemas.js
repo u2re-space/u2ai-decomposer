@@ -16,6 +16,15 @@ const nullableString = { type: ['string', 'null'] };
 const nullableInteger = { type: ['integer', 'null'] };
 const nullableNumber = { type: ['number', 'null'] };
 const object = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+/** The same object, but the answer may leave it out and say null instead. */
+const nullableObject = (properties) => ({
+    type: ['object', 'null'],
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+});
+/** A list of numbers that the answer may leave out and say null instead. */
+const nullableNumbers = { type: ['array', 'null'], items: { type: 'number' } };
 
 export const SUB_REFERENCE_KINDS = ['crop', 'split', 'restored', 'repaired', 'regenerated', 'figma-export'];
 
@@ -122,7 +131,7 @@ const quadCorner = object({
 
 export const RECTIFY_SCHEMA = object({
     verdict: { type: 'string', enum: ['keep', 'rectified', 'unresolved'], description: 'keep=flat, rectified=projection applied, unresolved=need data.' },
-    assessment: { ...string, description: 'What the picture is and how each screen sits.' },
+    assessment: { ...string, description: 'What the picture is and how each screen sits, with the tilt of every screen in degrees.' },
     screens: {
         type: 'array',
         maxItems: 8,
@@ -130,12 +139,13 @@ export const RECTIFY_SCHEMA = object({
         items: object({
             label: { ...string, description: 'Screen label.' },
             output: { ...string, description: 'Path of the rectified file.' },
-            quad: { ...object({
+            quad: { ...nullableObject({
                 tl: { ...quadCorner, description: 'Top-left corner.' },
                 tr: { ...quadCorner, description: 'Top-right corner.' },
                 br: { ...quadCorner, description: 'Bottom-right corner.' },
                 bl: { ...quadCorner, description: 'Bottom-left corner.' },
-            }), description: 'Four corners passed to correct_perspective.' },
+            }), description: 'The four corners of the screen. Null when a matrix is given instead.' },
+            matrix: { ...nullableNumbers, description: 'A projective matrix of 9 (3x3) or 16 (4x4) numbers, row major, that maps the source pixels onto the result. An alternative to the four corners.' },
         }),
     },
 });

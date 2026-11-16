@@ -19,6 +19,7 @@ import {
     quadCorners,
     runRectify,
     screenFileName,
+    screenGeometry,
     swapReferencePaths,
     validateRectifiedFile,
     RECTIFIED_DIR,
@@ -144,6 +145,48 @@ test('the file of a screen is named after the screen', () => {
     assert.equal(screenFileName('Home Screen', 0), '01-home-screen.png');
     assert.equal(screenFileName('Ünïcode!', 2), '03-n-code.png');
     assert.equal(screenFileName('', 0), '01-screen.png');
+});
+
+test('the geometry of a screen is read in degrees', () => {
+    const quad = { tl: { x: 0, y: 0 }, tr: { x: 100, y: 0 }, br: { x: 100, y: 100 }, bl: { x: 0, y: 100 } };
+    const corners = screenGeometry({ quad });
+    assert.equal(corners.rotation, 0, 'a rectangle is not turned');
+    assert.equal(corners.skew, 0);
+    assert.equal(corners.keystone, 0);
+
+    const matrix = screenGeometry({ matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1] });
+    assert.equal(matrix.rotation, 0);
+    assert.equal(matrix.scaleX, 1);
+    assert.equal(matrix.scaleY, 1);
+
+    assert.equal(screenGeometry({}), null, 'nothing to measure');
+    assert.equal(screenGeometry({ matrix: [1, 2, 3] }), null, 'a matrix that is not a matrix');
+});
+
+test('the stage warps the picture with the matrix the role named', async () => {
+    const root = await workDirWith(8);
+    try {
+        const rad = (-8 * Math.PI) / 180;
+        const matrix = [
+            Math.cos(rad), -Math.sin(rad), 0,
+            Math.sin(rad), Math.cos(rad), 0,
+            0, 0, 1,
+        ];
+        const state = stateFor(root, mockRoles({
+            verdict: 'rectified',
+            assessment: 'the whole picture is turned by 8 degrees',
+            screens: [{ label: 'home', matrix }],
+        }));
+        await runRectify(state, () => {});
+        const accepted = state.rectified.find((item) => item.to);
+        assert.ok(accepted, state.warnings.join('; '));
+        assert.equal(accepted.screen, 'home');
+        assert.ok(Math.abs(accepted.geometry.rotation - (-8)) < 0.01,
+            `the turn of the matrix is ${accepted.geometry.rotation}°`);
+        assert.ok(Math.abs(accepted.after) < 0.8, `the tilt left is ${accepted.after}°`);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
 });
 
 test('the stage projects the corners itself when the role wrote no file', async () => {
@@ -660,12 +703,15 @@ test('the re-cut takes a part of the same budget', async () => {
 
 test('the file list is read from screens, and an older single-file answer still counts', () => {
     assert.deepEqual(producedScreens({ screens: [{ label: 'home', output: 'a.png', quad: null }] }),
-        [{ label: 'home', output: 'a.png', quad: null }]);
+        [{ label: 'home', output: 'a.png', quad: null, matrix: null }]);
     assert.deepEqual(producedScreens({ screens: [{ label: 'home', output: '  ' }] }), []);
     assert.deepEqual(producedScreens({ verdict: 'keep', screens: [] }), []);
     assert.deepEqual(producedScreens(null), []);
     assert.deepEqual(producedScreens({ verdict: 'rectified', output: 'b.png', quad: { tl: 1 } }),
-        [{ label: '', output: 'b.png', quad: { tl: 1 } }]);
+        [{ label: '', output: 'b.png', quad: { tl: 1 }, matrix: null }]);
+    // A matrix is a screen of its own: the role may correct the whole picture without corners.
+    assert.deepEqual(producedScreens({ screens: [{ label: 'all', matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1] }] }),
+        [{ label: 'all', output: '', quad: null, matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1] }]);
 });
 
 test('a produced file is only a result when it is inside the output directory', async () => {

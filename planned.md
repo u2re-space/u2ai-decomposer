@@ -1455,6 +1455,48 @@ planned.md (RU). Проверка: `npm test` — 277 тестов, все пр�
 
 ---
 
+## 40. Градусы наклонов и матрицы 3×3/4×4 в rectifier (step-c11) — ✅ ЗАВЕРШЁН
+
+Роль rectifier'а говорила «картинка слегка наклонена». Проверить это нечем: 2.4° и 0.2° — это две
+разные картинки, и только одна из них заслуживает ещё одной попытки. А четыре угла — это один
+способ сказать, что картинка кривая: угол говорит, куда поехали четыре точки, а матрица говорит,
+куда поехал **каждый** пиксель. Когда кривая вся картинка (поворот, клин, масштаб), углы одного
+экрана сказать ничего не могут.
+
+- [x] `src/image/angles.js` — углы в градусах: `quadAngles` (поворот, сдвиг кромок, схождение
+      вертикальных кромок) и `matrixAngles` (поворот, сдвиг, масштабы по осям), `ANGLE_EPSILON`.
+      Знак положительный = по часовой стрелке (вниз вправо)
+- [x] `src/image/distort.js` — общий warp вынесен в `warpByHomography` (обратная карта +
+      билинейная выборка, прозрачность вне источника), `perspectiveRectify` возвращает `angles`
+- [x] `src/image/matrix.js` — матрицы: `parseMatrix` (9 или 16 чисел, строками, столбцами,
+      строкой JSON, строкой чисел), `matrixToHomography` (4×4 действует на (x, y, 0, 1),
+      перевод точный), `invertHomography`, `matrixRectify` (warp + кадр результата + замер
+      остаточного наклона)
+- [x] `src/image/rectify.js` и `src/index.js` — реэкспорт поверхности rectify
+- [x] `src/agent/schemas.js` — `RECTIFY_SCHEMA`: `quad` и `matrix` оба nullable, роль отвечает
+      одним из двух
+- [x] `src/agent/tool-specs.js`, `src/agent/tools.js` — инструмент `apply_matrix`
+      (`path`, `matrix_json`, `output`), ответ говорит размер матрицы, кадр и градусы
+- [x] `src/config/defaults.js` — переключатель `tools.image_apply_matrix`
+- [x] `src/stages/rectify.js` — `producedScreens` несёт `matrix`, `projectMatrix`, `screenGeometry`;
+      применение матрицы в цикле попыток; в отчёте стадии — `geometry` (градусы) рядом с
+      `before`/`after`; `RECTIFIER_TOOLS` += `apply_matrix`
+- [x] `src/roles/rectifier.js` — инструкции переписаны: говорить в градусах (поворот, сдвиг,
+      схождение), матрица — для всей картинки, углы — для одного экрана
+- [x] `src/cli/renderer.js` — печать градусов в `rectify.file`
+- [x] `src/help.js` — справка стадии rectify: градусы и матрица 3×3/4×4
+- [x] `test/matrix.test.js` — 16 тестов: углы квада и матрицы, чтение матрицы во всех форматах,
+      4×4 как (x, y, 0, 1), инверсия, поворот и масштаб картинки, отказ испорченной матрицы
+- [x] `test/rectify.test.js` — геометрия экрана в градусах, warp матрицей в стадии, чтение
+      `matrix` в ответе роли
+- [x] `test/agent.test.js` — каталог и исполнитель `apply_matrix`
+- [x] README (EN) — раздел «The angles of a picture and the matrix that corrects it», модули
+      `angles.js`/`matrix.js`/`distort.js`
+- [x] Проверка: `npm test` — 334 теста, все проходят; кириллица в `src/` только в
+      `config/parser.js`, `config/validate.js`, `openai/seedream.js`
+
+---
+
 ## Порядок работы и зависимости шагов
 
 ```

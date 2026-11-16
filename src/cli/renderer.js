@@ -266,9 +266,15 @@ export function createPlainRenderer({ verbose = false } = {}) {
             case 'rectify.recut':
                 console.log(`  re-cut: ${e.file}${e.screen ? ` (${e.screen})` : ''} — the screen was cut off`);
                 break;
-            case 'rectify.file':
-                console.log(`  rectified: ${e.file}${e.screen ? ` (${e.screen})` : ''}`);
+            case 'rectify.file': {
+                const geometry = e.geometry ?? null;
+                const degrees = geometry
+                    ? ` — turned ${geometry.rotation ?? 0}°, skewed ${geometry.skew ?? 0}°`
+                    : '';
+                const residual = e.after === null || e.after === undefined ? '' : `, residual ${e.after}°`;
+                console.log(`  rectified: ${e.file}${e.screen ? ` (${e.screen})` : ''}${degrees}${residual}`);
                 break;
+            }
             case 'rectify.repair.start':
                 console.log(`  repairing: ${e.file} — pass ${e.pass ?? 1}`
                     + `${e.patches ? `, ${e.patches} region(s)` : ''}`);
@@ -575,9 +581,15 @@ export function createRenderer({ verbose = false } = {}) {
             case 'rectify.recut':
                 say(paint(`  re-cut: ${e.file}${e.screen ? ` (${e.screen})` : ''} — the screen was cut off`, COLORS.dim));
                 break;
-            case 'rectify.file':
-                say(paint(`  rectified: ${e.file}${e.screen ? ` (${e.screen})` : ''}`, COLORS.dim));
+            case 'rectify.file': {
+                const geometry = e.geometry ?? null;
+                const degrees = geometry
+                    ? ` — turned ${geometry.rotation ?? 0}°, skewed ${geometry.skew ?? 0}°`
+                    : '';
+                const residual = e.after === null || e.after === undefined ? '' : `, residual ${e.after}°`;
+                say(paint(`  rectified: ${e.file}${e.screen ? ` (${e.screen})` : ''}${degrees}${residual}`, COLORS.dim));
                 break;
+            }
             case 'rectify.repair.start':
                 say(paint(`  repairing: ${e.file} — pass ${e.pass ?? 1}`
                     + `${e.patches ? `, ${e.patches} region(s)` : ''}`, COLORS.dim));

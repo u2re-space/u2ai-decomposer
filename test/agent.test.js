@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import sharp from 'sharp';
 
 import { TOOL_SPECS, toolSpecs, toolEnabled, configKeyFor, enabledToolNames } from '../src/agent/tool-specs.js';
 import { createToolset, mcpToolEntries } from '../src/agent/tools.js';
@@ -20,6 +21,7 @@ import { DECOMPOSER_SCHEMA } from '../src/agent/schemas.js';
 test('the config switch of a tool is named after its domain', () => {
     assert.equal(configKeyFor('crop_image'), 'image_crop');
     assert.equal(configKeyFor('correct_perspective'), 'image_correct_perspective');
+    assert.equal(configKeyFor('apply_matrix'), 'image_apply_matrix');
     assert.equal(toolEnabled({ image_crop: false }, 'crop_image'), false);
     assert.equal(toolEnabled({ image_crop: true }, 'crop_image'), true);
     // A tool that the config does not mention is on.
@@ -36,6 +38,7 @@ test('the tool list follows the switches and the role', () => {
 
     const rectifier = toolSpecs({}, { role: 'rectifier' });
     assert.ok(rectifier.some((spec) => spec.name === 'correct_perspective'));
+    assert.ok(rectifier.some((spec) => spec.name === 'apply_matrix'));
     assert.ok(!rectifier.some((spec) => spec.name === 'split_image'));
 });
 
@@ -57,6 +60,33 @@ test('a toolset answers a call with the result of the operation', async () => {
         assert.equal(answer, 'not really a picture');
         const unknown = await toolset.execute('no_such_tool', {});
         assert.match(unknown, /Unknown tool/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('the matrix tool warps a picture and says by how much', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-matrix-tool-'));
+    try {
+        const source = path.join(dir, 'picture.png');
+        const data = Buffer.alloc(40 * 30 * 4);
+        for (let at = 0; at < 40 * 30; at++) {
+            data[at * 4] = 200;
+            data[at * 4 + 1] = 200;
+            data[at * 4 + 2] = 200;
+            data[at * 4 + 3] = 255;
+        }
+        await sharp(data, { raw: { width: 40, height: 30, channels: 4 } }).png().toFile(source);
+
+        const toolset = createToolset({ root: dir, config: { tools: {}, raster: { engine: 'sharp' } } });
+        const answer = await toolset.execute('apply_matrix', {
+            path: 'picture.png',
+            matrix_json: JSON.stringify([2, 0, 0, 0, 2, 0, 0, 0, 1]),
+            output: 'warped.png',
+        });
+        assert.match(answer, /Warped by a 3×3 matrix/);
+        assert.match(answer, /80×60/, answer);
+        assert.match(answer, /residual tilt/, answer);
     } finally {
         await rm(dir, { recursive: true, force: true });
     }

@@ -16,6 +16,8 @@ export * from './image/raster.js';
 export * from './image/magick.js';
 export * from './image/skew.js';
 export * from './image/distort.js';
+export * from './image/angles.js';
+export * from './image/matrix.js';
 export * from './image/rectify.js';
 export * from './image/crop.js';
 export * from './image/padding.js';

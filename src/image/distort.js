@@ -19,9 +19,10 @@
  *   tilt of the output is measured instead (`image/skew`), so the caller reads the truth about the
  *   result instead of inferring it from the corners it typed in.
  *
- * @depends node:path, node:fs/promises, image/raster, image/skew
- * @usedBy image/rectify, agent/tools (correct_perspective)
- * @exports perspectiveRectify, quadToRect, solveQuadError, solveHomography, CORNER_ORDER
+ * @depends node:path, node:fs/promises, image/raster, image/skew, image/angles
+ * @usedBy image/rectify, image/matrix, agent/tools (correct_perspective)
+ * @exports perspectiveRectify, quadToRect, solveQuadError, solveHomography, warpByHomography,
+ *   CORNER_ORDER
  * @ai.tags images, perspective, homography, decomposer, rectification
  * @ai.hint io
  * @ai.hint legacy-0.2
@@ -35,6 +36,7 @@ import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { decodeRgba, encodeRgba } from './raster.js';
 import { measureResidualSkewFromBytes } from './skew.js';
+import { quadAngles } from './angles.js';
 
 /**
  * The corner order this module speaks: top-left, top-right, bottom-left, bottom-right.
@@ -224,6 +226,48 @@ function sampleBilinear(frame, x, y, out) {
 }
 
 /**
+ * Warp a picture with a homography, pixel by pixel.
+ *
+ * The homography maps the result onto the source: every pixel of the output asks the source
+ * where it came from, and the source is sampled once, with bilinear weights. A pixel that falls
+ * outside the source stays transparent — the caller sees the part of the picture the transform
+ * did not cover.
+ *
+ * @param {{ source: {width:number,height:number,data:Buffer}, h: number[][], width: number,
+ *   height: number, origin?: {x:number,y:number}|null, signal?: AbortSignal|null }} params
+ *   `origin` is the point of the destination that the first pixel of the output stands for.
+ * @returns {{ width: number, height: number, channels: number, data: Buffer }}
+ * @exports
+ * @ai.hint pure
+ */
+export function warpByHomography({ source, h, width, height, origin = null, signal = null }) {
+    const out = { width, height, channels: 4, data: Buffer.alloc(width * height * 4) };
+    const pixel = [0, 0, 0, 0];
+    const offsetX = origin?.x ?? 0;
+    const offsetY = origin?.y ?? 0;
+    for (let y = 0; y < height; y++) {
+        signal?.throwIfAborted();
+        for (let x = 0; x < width; x++) {
+            const at = (y * width + x) * 4;
+            const point = applyHomography(h, x + offsetX, y + offsetY);
+            if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
+                || point.x < -0.5 || point.y < -0.5
+                || point.x > source.width - 0.5 || point.y > source.height - 0.5) {
+                // Outside the source: transparent, the same way ImageMagick's transparent virtual
+                // pixel behaved — the caller sees what the quad did not cover.
+                continue;
+            }
+            sampleBilinear(source, point.x, point.y, pixel);
+            out.data[at] = pixel[0];
+            out.data[at + 1] = pixel[1];
+            out.data[at + 2] = pixel[2];
+            out.data[at + 3] = pixel[3];
+        }
+    }
+    return out;
+}
+
+/**
  * Rectify a quadrilateral region of an image into an upright rectangle.
  *
  * The homography is solved from the four corner pairs and the output is resampled with an inverse
@@ -273,27 +317,13 @@ export async function perspectiveRectify({
         [{ x: a.x, y: a.y }, { x: b.x, y: b.y }, { x: c.x, y: c.y }, { x: d.x, y: d.y }],
     );
 
-    const out = { width: destWidth, height: destHeight, channels: 4, data: Buffer.alloc(destWidth * destHeight * 4) };
-    const pixel = [0, 0, 0, 0];
-    for (let y = 0; y < destHeight; y++) {
-        signal?.throwIfAborted();
-        for (let x = 0; x < destWidth; x++) {
-            const at = (y * destWidth + x) * 4;
-            const point = applyHomography(h, x, y);
-            if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
-                || point.x < -0.5 || point.y < -0.5
-                || point.x > source.width - 0.5 || point.y > source.height - 0.5) {
-                // Outside the source: transparent, the same way ImageMagick's transparent virtual
-                // pixel behaved — the caller sees what the quad did not cover.
-                continue;
-            }
-            sampleBilinear(source, point.x, point.y, pixel);
-            out.data[at] = pixel[0];
-            out.data[at + 1] = pixel[1];
-            out.data[at + 2] = pixel[2];
-            out.data[at + 3] = pixel[3];
-        }
-    }
+    const out = warpByHomography({
+        source,
+        h,
+        width: destWidth,
+        height: destHeight,
+        signal,
+    });
 
     const png = await encodeRgba(out, engine);
     await mkdir(path.dirname(outputAbs), { recursive: true });
@@ -317,6 +347,8 @@ export async function perspectiveRectify({
         height: destHeight,
         engine: 'local',
         quadError: solveQuadError(quad),
+        // The geometry of the cut in degrees: how far the screen was turned, sheared and squeezed.
+        angles: quadAngles(quad),
         source: { width: source.width, height: source.height },
         quadUsed: quad,
         residual,

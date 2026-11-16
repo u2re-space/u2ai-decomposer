@@ -19,12 +19,12 @@
  *   file. A collage of three phones at different angles is therefore separated here.
  *
  * @depends node:path, node:fs/promises, agent/schemas, agent/paths, agent/tool-specs,
- *   image/raster, image/skew, openai/responses, openai/images, roles/index
+ *   image/raster, image/skew, image/rectify, openai/responses, openai/images, roles/index
  * @usedBy shared/pipeline
  * @exports runRectify, acceptsRectification, producedScreens, validateRectifiedFile,
- *   swapReferencePaths, quadCorners, screenFileName, projectQuad, opaqueShare, referenceFiles,
- *   cropOfReference, screenKey, betterAngle, RECTIFIED_DIR, MAX_RESIDUAL_DEG, MIN_IMPROVEMENT_DEG,
- *   RECTIFIER_TOOLS
+ *   swapReferencePaths, quadCorners, screenFileName, projectQuad, projectMatrix, screenGeometry,
+ *   opaqueShare, referenceFiles, cropOfReference, screenKey, betterAngle, RECTIFIED_DIR,
+ *   MAX_RESIDUAL_DEG, MIN_IMPROVEMENT_DEG, RECTIFIER_TOOLS
  * @ai.tags rectification, perspective, screens
  * @ai.hint keep
  * @ai.hint legacy-0.2
@@ -37,7 +37,7 @@ import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 import { isInside, resolveInside, toPosix } from '../agent/paths.js';
 import { toolSpecs } from '../agent/tool-specs.js';
 import { rasterInfo, decodeRgba } from '../image/raster.js';
-import { perspectiveRectify } from '../image/rectify.js';
+import { matrixAngles, matrixRectify, matrixToHomography, perspectiveRectify, quadAngles } from '../image/rectify.js';
 import { measureResidualSkew } from '../image/skew.js';
 import { imagePart } from '../openai/responses.js';
 import { sniffImage } from '../openai/images.js';
@@ -53,7 +53,7 @@ export const MAX_RESIDUAL_DEG = 0.8;
 export const MIN_IMPROVEMENT_DEG = 0.4;
 
 /** The tools the rectifier may call: geometry and verification, nothing else. */
-export const RECTIFIER_TOOLS = ['view_image', 'correct_perspective', 'compare_images'];
+export const RECTIFIER_TOOLS = ['view_image', 'correct_perspective', 'apply_matrix', 'compare_images'];
 
 /** What the role is told when the picture has to be cut screen by screen. */
 const SPLIT_NOTE = [
@@ -135,7 +135,8 @@ export function betterAngle(next, current, minImprovement = MIN_IMPROVEMENT_DEG)
  * folded into that list rather than discarded — the work is in the file it wrote, and losing a
  * correct projection to a shape mismatch would leave the skewed reference in place.
  * @param {object|null} data the parsed rectifier answer
- * @returns {Array<{ label: string, output: string, quad: object|null }>}
+ * @returns {Array<{ label: string, output: string, quad: object|null, matrix: number[]|null }>}
+ * @exports
  * @ai.hint pure
  */
 export function producedScreens(data) {
@@ -144,13 +145,17 @@ export function producedScreens(data) {
             label: String(entry?.label ?? '').trim(),
             output: String(entry?.output ?? '').trim(),
             quad: entry?.quad ?? null,
+            matrix: Array.isArray(entry?.matrix) ? entry.matrix : null,
         }))
-        // A screen with corners but without a path is still a screen: the stage projects it and
-        // names the file itself.
-        .filter((entry) => entry.output || entry.quad);
+        // A screen with corners or with a matrix but without a path is still a screen: the stage
+        // projects it and names the file itself.
+        .filter((entry) => entry.output || entry.quad || entry.matrix);
     if (list.length) return list;
     const output = String(data?.output ?? '').trim();
-    return output || data?.quad ? [{ label: '', output, quad: data?.quad ?? null }] : [];
+    const matrix = Array.isArray(data?.matrix) ? data.matrix : null;
+    return output || data?.quad || matrix
+        ? [{ label: '', output, quad: data?.quad ?? null, matrix }]
+        : [];
 }
 
 /**
@@ -305,6 +310,60 @@ export async function projectQuad({
         return null;
     }
     return output;
+}
+
+/**
+ * Warp a picture with the matrix the role named and write the result into the output directory.
+ *
+ * A matrix says where every pixel goes, so it corrects the whole picture at once: the corners
+ * of one screen cannot say that. The matrix is read as source → destination, and the harness
+ * takes the inverse of it for the sampling, so the pixels of the source are the ones that end
+ * up in the result.
+ * @param {{ source: string, outDir: string, label: string, matrix: number[], index: number,
+ *   name?: string|null, cwd: string, engine?: string }} params
+ * @returns {Promise<string|null>} the absolute path of the written file, or null when the matrix
+ *   cannot be used
+ * @exports
+ * @ai.hint io
+ */
+export async function projectMatrix({
+    source, outDir, label, matrix, index, name = null, cwd, engine = 'auto',
+}) {
+    if (!Array.isArray(matrix) || (matrix.length !== 9 && matrix.length !== 16)) return null;
+    const fileName = name && /\.png$/i.test(name) ? path.basename(name) : screenFileName(label, index);
+    const output = path.join(outDir, fileName);
+    try {
+        await matrixRectify({ input: source, output, matrix, cwd, engine });
+    } catch {
+        return null;
+    }
+    return output;
+}
+
+/**
+ * The geometry of a screen in degrees: the corners the role named, or the matrix it named.
+ *
+ * The numbers are the ones a reader can check: how far the screen is turned, how far it is
+ * sheared and how far its sides converge. A quad that cannot be read has no geometry, and a
+ * matrix that cannot be read neither.
+ * @param {{ quad?: object|null, matrix?: number[]|null }} entry one entry of the answer
+ * @returns {object|null}
+ * @exports
+ * @ai.hint pure
+ */
+export function screenGeometry(entry) {
+    if (entry?.quad) {
+        const corners = quadCorners(entry.quad);
+        return corners ? quadAngles(corners) : null;
+    }
+    if (Array.isArray(entry?.matrix) && (entry.matrix.length === 9 || entry.matrix.length === 16)) {
+        try {
+            return matrixAngles(matrixToHomography(entry.matrix));
+        } catch {
+            return null;
+        }
+    }
+    return null;
 }
 
 /**
@@ -909,13 +968,36 @@ export async function runRectify(state, notify = () => {}) {
                             });
                         }
                     }
+                } else if (entry.matrix) {
+                    // A matrix corrects the whole picture at once: the corners of one screen
+                    // cannot say that.
+                    const warped = await projectMatrix({
+                        source: located.abs,
+                        outDir: scratch,
+                        label: state.label || entry.label || 'screen',
+                        matrix: entry.matrix,
+                        index,
+                        name: null,
+                        cwd: root,
+                        engine,
+                    });
+                    if (warped) {
+                        candidateAbs = warped;
+                        if (!roleValid.ok) {
+                            notify({
+                                type: 'rectify.projected',
+                                file: toPosix(path.relative(root, warped)),
+                                screen: state.label,
+                            });
+                        }
+                    }
                 } else if (roleValid.ok) {
                     candidateAbs = roleFile;
                 }
 
                 if (!candidateAbs) {
                     const reason = roleValid.reason === 'the output file was not found'
-                        ? 'the file was not written and the corners could not be projected'
+                        ? 'the file was not written and the geometry could not be applied'
                         : roleValid.reason;
                     warnings.push(`rectify: ${file.rel}: the result "${entry.output ?? state.label}" was not accepted — ${reason}`);
                     state.reason = reason;
@@ -1006,6 +1088,9 @@ export async function runRectify(state, notify = () => {}) {
                     // The corners the screen was cut by: the ai-mode maps a region of the screen
                     // back onto the reference with them.
                     quad: entry.quad ?? null,
+                    // The geometry of the cut in degrees: how far the screen was turned, sheared
+                    // and squeezed before the warp.
+                    geometry: screenGeometry(entry),
                 };
                 state.reason = '';
                 notify({
@@ -1015,6 +1100,7 @@ export async function runRectify(state, notify = () => {}) {
                     screen: state.label,
                     before: sourceSkew?.angleDeg ?? null,
                     after: angle,
+                    geometry: state.best.geometry ?? null,
                 });
             }
 
@@ -1040,6 +1126,9 @@ export async function runRectify(state, notify = () => {}) {
                 confidence: state.best.confidence,
                 assessment: state.best.assessment,
                 quad: state.best.quad ?? null,
+                // The geometry of the cut in degrees: the turn, the shear and the squeeze of the
+                // perspective, measured on the corners or on the matrix the role named.
+                geometry: state.best.geometry ?? null,
             });
             keptFiles.add(path.resolve(root, state.best.rel));
         }

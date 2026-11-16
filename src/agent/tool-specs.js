@@ -114,6 +114,25 @@ export const TOOL_SPECS = Object.freeze({
         required: ['path', 'corners_json'],
         roles: ['decomposer', 'rectifier'],
     },
+    apply_matrix: {
+        configKey: 'image_apply_matrix',
+        description: 'Warp a whole picture with a projective matrix. The matrix has 9 (3x3) or 16 (4x4) numbers, '
+            + 'row major, and maps the source pixels onto the result: give the forward matrix, the harness inverts it. '
+            + 'A 4x4 matrix acts on (x, y, 0, 1). Use it when the whole picture is turned, squeezed or scaled; '
+            + 'use correct_perspective when one screen is cut out of a picture.',
+        parameters: {
+            type: 'object',
+            properties: {
+                path: str('Path of the source image.'),
+                matrix_json: str('The matrix: JSON array of 9 or 16 numbers, row major.'),
+                output: str('Path of the written file. Empty = next to the source with a -warped suffix.'),
+            },
+            required: ['path', 'matrix_json'],
+            additionalProperties: false,
+        },
+        required: ['path', 'matrix_json'],
+        roles: ['rectifier'],
+    },
     generate_image: {
         configKey: 'image_generate',
         description: 'Draw a new picture from a prompt.',

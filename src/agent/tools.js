@@ -164,7 +164,28 @@ export function createToolset({ root, config, client, role = null, mcp = [], wri
                     cwd: root,
                     engine,
                 });
-                return `Perspective corrected → ${result.rel} (${result.width}×${result.height}, residual tilt ${result.residual?.angleDeg ?? 0}°)`;
+                const angles = result.angles ?? {};
+                return `Perspective corrected → ${result.rel} (${result.width}×${result.height}, `
+                    + `turned ${angles.rotation ?? 0}°, skewed ${angles.skew ?? 0}°, `
+                    + `keystone ${angles.keystone ?? 0}°, residual tilt ${result.residual?.angleDeg ?? 0}°)`;
+            }
+            case 'apply_matrix': {
+                const { matrixRectify } = await import('../image/matrix.js');
+                const located = await readPath(args.path);
+                const parsed = path.parse(located.abs);
+                const fallback = path.join(parsed.dir, `${parsed.name}-warped.png`);
+                const target = await writePath(args.output ?? fallback);
+                const result = await matrixRectify({
+                    input: located.abs,
+                    output: target.abs,
+                    matrix: args.matrix_json,
+                    cwd: root,
+                    engine,
+                });
+                const angles = result.angles ?? {};
+                return `Warped by a ${result.matrix.size}×${result.matrix.size} matrix → ${result.rel} `
+                    + `(${result.width}×${result.height}, turned ${angles.rotation ?? 0}°, `
+                    + `skewed ${angles.skew ?? 0}°, residual tilt ${result.residual?.angleDeg ?? 0}°)`;
             }
             case 'generate_image': {
                 if (!client?.images) return 'Images API unavailable';

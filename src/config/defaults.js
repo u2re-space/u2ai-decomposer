@@ -144,6 +144,7 @@ export const defaults = {
     image_split: true,
     image_compare: true,
     image_correct_perspective: true,
+    image_apply_matrix: true,
     image_generate: true,
     image_edit: true,
   },

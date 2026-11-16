@@ -199,6 +199,9 @@ destination must not exist unless `overwrite` is asked for.
 Sharp → Canvas → ImageMagick fallback chain:
 - `raster.js`: crop, patch, decodeRgba, pad, compare, fit-to-box
 - `rectify.js`: perspective correction, residual skew measurement
+- `angles.js`: the turn, the shear and the squeeze of a picture, in degrees
+- `matrix.js`: the projective matrix of 3×3 or 4×4, and the warp that runs on it
+- `distort.js`: the homography and the bilinear warp of a quad
 - `geometry.js`: rotation and size correction of the pixels, with the skew measured before and after
 - `magick.js`: ImageMagick wrapper
 - `padding.js`: canvas expansion
@@ -319,6 +322,58 @@ treated as a crop — it carries work of its own and is worked on as it is.
 
 One picture cut into several screens becomes several screens in `decomposition.json`: the chain
 of the files follows every branch, so the answer names every screen of the collage.
+
+### The angles of a picture and the matrix that corrects it
+
+The rectifier does not say "a bit tilted": it says **how many degrees**. A tilt of 2.4° and a
+tilt of 0.2° are two different pictures, and only one of them needs another attempt, so the
+role is asked for numbers that can be checked against the pixels of the result.
+
+Three numbers describe the geometry of a screen:
+
+| Angle | What it is | How it is measured |
+|-------|-----------|-------------------|
+| `rotation` | The turn of the picture — how far it is clockwise | The mean tilt of the two horizontal edges |
+| `skew` | The shear — how far the two horizontal edges disagree | The difference of the two edge angles |
+| `keystone` | The squeeze of the perspective — how far the two vertical edges disagree | The difference of the two edge angles |
+
+The sign is the one of the picture itself: positive means the content runs downhill to the
+right, that is, clockwise on the screen. The numbers are measured on the corners the role
+named (`quadAngles`) and on the matrix it named (`matrixAngles`), and they are kept in the
+report of the stage — in `rectify.file`, in the accepted entries of the state and in the
+output of the run:
+
+```
+  rectified: decomposition/rectified/01-home.png (home) — turned 2.4°, skewed 0.6°, residual 0.3°
+```
+
+The **matrix** is the other way of saying the same thing. The four corners say where four
+points go; a matrix says where *every* point goes. When the whole picture is turned, squeezed
+or scaled, the corners of one screen have nothing to say — the matrix says it in nine numbers.
+
+- The matrix is read as **source → destination**: it maps the pixels of the source onto the
+  result. The harness inverts it and samples the source with bilinear weights, so the pixels
+  that end up in the result are the pixels that were there — no resampling by a model.
+- A **3×3** matrix is the homography itself. A **4×4** matrix acts on the column `(x, y, 0, 1)`:
+  the third coordinate is zero, the fourth is one, and the point of the result is
+  `(q₀/q₃, q₁/q₃)`. The 4×4 matrix is the 3×3 homography with the translation in the last
+  column, and the conversion is exact.
+- The frame of the result is the frame the matrix gives the picture: the corners of the source
+  mapped through the matrix, and the picture framed on what it becomes. A turn therefore leaves
+  the empty corners of the turn transparent, and a scale grows the picture as the matrix says.
+
+The role reaches the matrix through the tool **`apply_matrix`** (the switch
+`tools.image_apply_matrix`, on by default), and it may also name the matrix in its answer:
+the entry of a screen in `RECTIFY_SCHEMA` carries either the four corners or the matrix, and
+the stage runs the warp on the one it was given.
+
+```
+apply_matrix — path, matrix_json (9 or 16 numbers, row major), output
+→ Warped by a 3×3 matrix → decomposition/rectified/01-home.png (214×150, turned 2.4°, skewed 0.6°, residual tilt 0.3°)
+```
+
+The rule of the house stays the same either way: a copy is kept only when the tilt that is
+left in its pixels is smaller than the tilt of the picture it replaces.
 
 ### The AI mode of the rectify stage
 
