@@ -148,6 +148,8 @@ export const defaults = {
     image_magick: true,
     image_generate: true,
     image_edit: true,
+    /** Call any CLI of the house with the flags of its own command line. */
+    external_cli: true,
   },
 
   // --- raster ----------------------------------------------------------------
@@ -206,6 +208,12 @@ export const defaults = {
       padFraction: 0.125,
       /** Max verify-and-stitch attempts on the extended band. */
       maxAttempts: 2,
+      /**
+       * Max agent turns for the extender role. The role may call a CLI of the house and
+       * read the answer of it, so the budget is more than one turn; the role that needs
+       * no tool still answers on the first turn.
+       */
+      maxTurns: 4,
       /**
        * The quality of the picture the editor is asked for. The band is a background
        * that is stitched at the edge of the source, so the cheapest quality is enough
@@ -268,6 +276,12 @@ export const defaults = {
       /** Max AI repair attempts per lost detail. */
       maxAttempts: 2,
       /**
+       * Max agent turns for the restorer role. The role may call a CLI of the house and
+       * read the answer of it, so the budget is more than one turn; the role that needs
+       * no tool still answers on the first turn.
+       */
+      maxTurns: 4,
+      /**
        * How many times the AI may work on one screen. A pass is the whole visit: the plan of the
        * role and the repair of the regions it named. Three by default.
        */
@@ -298,6 +312,12 @@ export const defaults = {
       enabled: true,
       /** Max AI erase attempts per overlapping element. */
       maxAttempts: 2,
+      /**
+       * Max agent turns for the overlap role. The role may call a CLI of the house and
+       * read the answer of it, so the budget is more than one turn; the role that needs
+       * no tool still answers on the first turn.
+       */
+      maxTurns: 4,
       /** Padding (px) around an overlap box before patching. */
       boxPadding: 16,
       /** Max regions of one screen that may be cleaned in one pass. */

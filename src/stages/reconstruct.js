@@ -47,6 +47,7 @@ import { copyFile, mkdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/
 import { RESTORE_SCHEMA } from '../agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../roles/index.js';
 import { resolveInside, toPosix } from '../agent/paths.js';
+import { toolSpecs } from '../agent/tool-specs.js';
 import { rasterCrop, rasterInfo, rasterPatch } from '../image/raster.js';
 import { applyGeometry } from '../image/geometry.js';
 import { defaults } from '../config/defaults.js';
@@ -61,6 +62,9 @@ export { prefersStartPicture };
 
 /** Directory under the work directory where the repaired copies are written. */
 export const RESTORED_DIR = 'restored';
+
+/** The tools the restorer may call: the house, and nothing that touches the pixels itself. */
+export const RESTORER_TOOLS = ['ai_cli', 'ai_cli_help'];
 
 /**
  * The screens the stage works on: the files the rectify stage produced, or the images of the state
@@ -109,12 +113,13 @@ async function sourcePart(root, source) {
  * the same box is not named twice.
  * @param {{ roles: object, file: object, frame: object, original: object|null, model: string|null,
  *   effort: string|null, pass?: number, maxPasses?: number, repaired?: object[],
- *   picture?: string|null }} params
+ *   picture?: string|null, extraTools?: object[]|null, maxTurns?: number }} params
  * @returns {Promise<object>} the answer of the role runner
  * @ai.hint io
  */
 async function askRestorer({
     roles, file, frame, original, model, effort, pass = 1, maxPasses = 1, repaired = [], picture = null,
+    extraTools = null, maxTurns = 4,
 }) {
     const bytes = await readFile(picture ?? file.abs);
     const resolved = roles.resolve?.('restorer');
@@ -146,7 +151,8 @@ async function askRestorer({
         instructions: resolved?.instructions ?? ROLE_INSTRUCTIONS.restorer,
         schema: RESTORE_SCHEMA,
         schemaName: 'restorePlan',
-        maxTurns: 1,
+        maxTurns,
+        extraTools,
         model,
         effort,
     });
@@ -196,14 +202,14 @@ function readGeometry(raw, limits) {
  *   roles: object, model: string|null, effort: string|null, editorModel: string,
  *   settings: object, engine: string, maxAttempts: number, maxPasses: number, boxPadding: number,
  *   maxPatches: number, geometryLimits: object, scratchRoot: string, notify: Function,
- *   usedNames: Set<string>, warnings: string[] }} params
+ *   usedNames: Set<string>, warnings: string[], extraTools: object[]|null, maxTurns: number }} params
  * @returns {Promise<{ replaced: object[], kept: object[] }>}
  * @ai.hint io
  */
 async function restoreScreen({
     file, index, root, workDir, client, roles, model, effort, editorModel, settings, engine,
     maxAttempts, maxPasses, boxPadding, maxPatches, geometryLimits, scratchRoot, notify,
-    usedNames, warnings,
+    usedNames, warnings, extraTools, maxTurns,
 }) {
     const replaced = [];
     const kept = [];
@@ -245,6 +251,8 @@ async function restoreScreen({
                 maxPasses,
                 repaired: applied,
                 picture: currentAbs,
+                extraTools,
+                maxTurns,
             });
             if (!plan?.data) {
                 warnings.push(`reconstruct: ${file.rel}: the restoration plan was not read `
@@ -501,7 +509,7 @@ async function restoreScreen({
  * @ai.hint io
  */
 export async function runReconstruct(state, notify = () => {}) {
-    const { root, workDir, config, client, roles, model, effort, imageModel, warnings } = state;
+    const { root, workDir, config, client, roles, model, effort, imageModel, warnings, toolset } = state;
     const files = inputFiles(state, root);
     if (!files.length) {
         warnings.push('reconstruct: no screens to restore');
@@ -525,6 +533,9 @@ export async function runReconstruct(state, notify = () => {}) {
     const maxPasses = Number.isSafeInteger(settings.maxPasses) ? Math.max(1, settings.maxPasses) : 3;
     const boxPadding = Number.isSafeInteger(settings.boxPadding) ? Math.max(0, settings.boxPadding) : FRAGMENT_MARGIN;
     const maxPatches = Number.isSafeInteger(settings.maxPatches) ? Math.max(1, settings.maxPatches) : 3;
+    // The budget of the turns of the role: the ceiling is high enough for a call of a tool
+    // and the answer after it, and the role that needs no tool still answers on the first turn.
+    const maxTurns = Number.isSafeInteger(settings.maxTurns) ? Math.max(1, settings.maxTurns) : 4;
     const geometrySettings = settings.geometry ?? defaults.stages.reconstruct.geometry;
     const geometryLimits = {
         enabled: geometrySettings.enabled !== false,
@@ -536,6 +547,15 @@ export async function runReconstruct(state, notify = () => {}) {
     const outDir = path.join(root, workDir, RESTORED_DIR);
     await mkdir(outDir, { recursive: true });
     const scratch = path.join(scratchDirOf(state), 'restore');
+    // The files of the role and of the CLI of the house land in the directories of the stage.
+    toolset?.setWriteDirs?.([outDir, scratch]);
+    const extraTools = toolset?.specsFor
+        ? toolset.specsFor('restorer', RESTORER_TOOLS)
+        : toolSpecs(config.tools ?? {}, {
+            role: 'restorer',
+            names: RESTORER_TOOLS,
+            imageApi: Boolean(client?.images),
+        });
 
     const usedNames = new Set();
 
@@ -562,6 +582,8 @@ export async function runReconstruct(state, notify = () => {}) {
         notify,
         usedNames,
         warnings,
+        extraTools,
+        maxTurns,
     })));
 
     const replaced = [];

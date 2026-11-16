@@ -22,7 +22,7 @@ import { cropScreens, planScreens } from './decompose-screens.js';
 import { writeFileAtomic } from '../shared/house.js';
 
 /** The tools the decomposer may call when it writes the screens itself. */
-export const AGENT_TOOLS = ['view_image', 'crop_image', 'split_image', 'compare_images', 'correct_perspective', 'magick', 'magick_help'];
+export const AGENT_TOOLS = ['view_image', 'crop_image', 'split_image', 'compare_images', 'correct_perspective', 'magick', 'magick_help', 'ai_cli', 'ai_cli_help'];
 
 /** The tools the decomposer may call when the harness cuts the screens. */
 export const INLINE_TOOLS = ['view_image'];

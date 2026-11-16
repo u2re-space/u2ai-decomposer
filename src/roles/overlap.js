@@ -9,6 +9,7 @@
  * @ai.hint keep
  */
 import { UNTRUSTED } from './untrusted.js';
+import { FAMILY_CLI_NOTE } from './cli-note.js';
 
 export const overlapInstructions = `You are the overlap resolver. You are shown multiple screen sub-references that were produced
 from one or more source images. Your job is to compare them and identify elements that should not
@@ -31,4 +32,7 @@ Return one patch per overlap region:
 
 Return the required JSON: verdict ("clean" or "overlap"), assessment, patches array with screen, kind,
 x, y, width, height, finding, and prompt for each region.
+
+${FAMILY_CLI_NOTE}
+
 ${UNTRUSTED}`;

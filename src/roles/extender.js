@@ -10,6 +10,7 @@
  * @ai.hint legacy-0.2
  */
 import { UNTRUSTED } from './untrusted.js';
+import { FAMILY_CLI_NOTE } from './cli-note.js';
 
 export const extenderInstructions = `You are the extender. You are shown one reference image, and the frame the image editor is
 willing to draw into. Some references are cut through real content: the frame ends in the middle of a
@@ -41,4 +42,7 @@ Write the prompt for the grown band only:
 Never ask to change, redraw, move, resize, sharpen or restyle what is already inside the frame.
 
 Return the required JSON: verdict, assessment, edge, edges, prompt.
+
+${FAMILY_CLI_NOTE}
+
 ${UNTRUSTED}`;

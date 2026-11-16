@@ -426,6 +426,61 @@ manual are in it: [usage.imagemagick.org](https://usage.imagemagick.org/),
 
 The switch `tools.image_magick` (on by default) turns both tools off.
 
+### The CLIs of the house
+
+The tools of the house are narrow on purpose: a crop, a split, a projection, a patch. But the
+neighbours of the house are wide: `ai-image` makes and cuts pictures (`resize`, `trim`, `pad`,
+`alpha`, `background`, `vectorize`, `info`), `ai-measure` measures them, and both know commands
+and flags that no narrow tool of this package covers. A role that needs one of them has nowhere
+to go — so the family gets a free door: the tool `ai_cli`.
+
+| CLI | What it does |
+|---|---|
+| `ai` | The umbrella: ask, chat, run, gen, image, decompose, component, serve, mcp. |
+| `ai-webdev` | The web project: the plan, the stages, the roles. |
+| `ai-decompose` | This CLI: splits a reference into screens and fragments. |
+| `ai-measure` | Measures a reference: the frames, the gaps, the sizes, the colours. |
+| `ai-image` | Makes the pictures of the project and cuts them. |
+
+A call names the CLI and the arguments of its command line, one argument per element:
+
+```json
+{"cli": "ai-image", "args": ["--help"]}
+{"cli": "ai-image", "args": ["info", "screens/01-home.png"]}
+{"cli": "ai-measure", "args": ["measure", "landing.png", "--out", "measurements"]}
+```
+
+The rule of the house about the flags is one line: **ask the CLI**. Every CLI of the family
+answers `--help` with the whole table of its commands and its flags, and `--version` with its
+version. The help is a local text — it calls no model and costs nothing, while a guessed flag
+costs a failed call and a wasted turn. The manual of the family — which CLI does what, the flags
+they share, the flags and the commands of every one of them — is in the tool `ai_cli_help`.
+
+The roles that work on a picture get the door — the extender, the decomposer, the rectifier, the
+restorer and the overlap resolver. The roles that *judge* the run (the reception, the director)
+do not: they have nothing to ask of a CLI.
+
+The rules of a free call are the rules of every tool of the house:
+
+1. **No shell.** The command is started with an array of arguments, so a path with a space or a
+   quote in it cannot become a second command. A shim of Windows is a batch file, and it is
+   started through the shell of the system — with the arguments quoted for it.
+2. **The paths stay inside the run.** Every path of the command is resolved against the root of
+   the run; a path that leaves it is refused. The file that is written has to land in a
+   directory the stage opened for writing.
+3. **A command that does not finish on its own is refused.** A server or a watcher would hold the
+   run until the timeout and bring nothing.
+
+The binary of a CLI is looked up in the environment variable of the CLI (`AI_BIN`,
+`AI_WEBDEV_BIN`, `AI_DECOMPOSE_BIN`, `AI_MEASURE_BIN`, `AI_IMAGE_BIN`), in the checkout of the
+sibling package, in `node_modules` and in the `PATH`. The switch `tools.external_cli` (on by
+default) turns both tools off.
+
+A role that calls a CLI needs more than one turn: it asks, it reads the answer, it decides. The
+budget of the turns of the three stages that gained the door — `stages.extend.maxTurns`,
+`stages.reconstruct.maxTurns`, `stages.overlap.maxTurns` — is four by default, and the ceiling of
+the house (`limits.maxPossibleTurns`, sixteen) still holds above it.
+
 ### The AI mode of the rectify stage
 
 The mode says who straightens the picture. `geometry` keeps the role where it belongs: it names

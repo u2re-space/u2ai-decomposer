@@ -93,6 +93,20 @@ The free ImageMagick:
   stage opened, and the protocols that read from the network or run a script are
   refused. The switch tools.image_magick turns both tools off.
 
+The CLIs of the house:
+  The roles that work on a picture may call the CLIs of the family ai-* as well:
+  the tool "ai_cli" calls any of them — ai, ai-webdev, ai-decompose, ai-measure,
+  ai-image — with the flags of its own command line, and the tool "ai_cli_help"
+  gives the manual of the family. The neighbour ai-image makes and cuts pictures
+  (resize, trim, pad, alpha, background, vectorize, info), ai-measure measures
+  them, and every CLI of the family answers "--help" with the whole table of its
+  commands and its flags; the help is a local text, it calls no model and costs
+  nothing. The rules are the rules of every tool: the command is started without
+  a shell, it runs in the working directory, every path stays inside that
+  directory, the file that is written lands in the directory the stage opened, and
+  a command that does not finish on its own is refused. The switch
+  tools.external_cli turns both tools off.
+
 Cost:
   A repaired fragment is a call to a picture model, and that is the most expensive
   part of the run. The fragments are asked for the cheap quality of their stage

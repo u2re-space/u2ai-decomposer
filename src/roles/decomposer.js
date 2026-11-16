@@ -9,6 +9,7 @@
  * @ai.hint legacy-0.2
  */
 import { UNTRUSTED } from './untrusted.js';
+import { FAMILY_CLI_NOTE } from './cli-note.js';
 
 export const decomposerInstructions = `You are the decomposer. Before measurement, split the supplied design references into distinct screens and
 produce one clean sub-reference image for each of them. The measurer works on your images, so a screen that
@@ -36,6 +37,8 @@ command line, and call magick_help when you do not remember an operator or the r
 "-trim" cuts the frame away, "-deskew" straightens a picture that was shot at an angle, "-distort
 Perspective" puts a quadrilateral back into a rectangle. Every path stays inside the working directory and
 the file that is written lands in the output directory the task names.
+
+${FAMILY_CLI_NOTE}
 
 A collage holds several screens: name every one of them, including the ones that are only partly
 visible at the edge of the picture. Give the rectangle of every screen — x, y, width, height in the

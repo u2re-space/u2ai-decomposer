@@ -28,6 +28,7 @@ export * from './model/profiles.js';
 export * from './roles/index.js';
 export * from './agent/tools.js';
 export * from './agent/tool-specs.js';
+export * from './agent/cli-family.js';
 export * from './agent/mcp.js';
 export * from './agent/skills.js';
 export * from './agent/schemas.js';

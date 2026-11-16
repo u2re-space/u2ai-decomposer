@@ -37,8 +37,8 @@ import { scratchDir as scratchDirOf } from '../shared/scratch.js';
 /** Directory under the work directory where the cleaned copies are written. */
 export const OVERLAP_DIR = 'overlap';
 
-/** The tools the overlap role may call: it looks, it compares, it names. */
-export const OVERLAP_TOOLS = ['view_image', 'compare_images'];
+/** The tools the overlap role may call: it looks, it compares, it names, it asks the house. */
+export const OVERLAP_TOOLS = ['view_image', 'compare_images', 'ai_cli', 'ai_cli_help'];
 
 /**
  * The screens the stage works on: the files the reconstruct stage produced, or the images of the
@@ -110,6 +110,9 @@ export async function runOverlap(state, notify = () => {}) {
     const maxAttempts = Number.isSafeInteger(settings.maxAttempts) ? Math.max(1, settings.maxAttempts) : 2;
     const boxPadding = Number.isSafeInteger(settings.boxPadding) ? Math.max(0, settings.boxPadding) : 16;
     const maxPatches = Number.isSafeInteger(settings.maxPatches) ? Math.max(1, settings.maxPatches) : 3;
+    // The budget of the turns of the role: the ceiling is high enough for a call of a tool
+    // and the answer after it, and the role that needs no tool still answers on the first turn.
+    const maxTurns = Number.isSafeInteger(settings.maxTurns) ? Math.max(1, settings.maxTurns) : 4;
     const quality = settings.quality ?? null;
 
     const outDir = path.join(root, workDir, OVERLAP_DIR);
@@ -152,7 +155,7 @@ export async function runOverlap(state, notify = () => {}) {
         instructions: resolved?.instructions ?? ROLE_INSTRUCTIONS.overlap,
         schema: OVERLAP_SCHEMA,
         schemaName: 'overlapPlan',
-        maxTurns: 1,
+        maxTurns,
         extraTools,
         model,
         effort,

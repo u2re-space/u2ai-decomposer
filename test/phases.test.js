@@ -249,8 +249,8 @@ test('the stages hold the tools their own job needs', () => {
     assert.deepEqual(INLINE_TOOLS, ['view_image']);
 
     // The overlap role names the foreign regions and the harness cuts them out, so it may only
-    // look and compare.
-    assert.deepEqual(OVERLAP_TOOLS, ['view_image', 'compare_images']);
+    // look and compare — and it may ask the CLIs of the house.
+    assert.deepEqual(OVERLAP_TOOLS, ['view_image', 'compare_images', 'ai_cli', 'ai_cli_help']);
 
     // The director reads the screen and names the layers; it never draws one.
     assert.deepEqual(DIRECTOR_TOOLS, ['view_image']);

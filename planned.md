@@ -1544,6 +1544,64 @@ planned.md (RU). Проверка: `npm test` — 277 тестов, все пр�
 
 ---
 
+## 42. Свободная дверь к CLI семейства `ai-*` (step-c13) — ✅ ЗАВЕРШЁН
+
+В декомпозере была свободная дверь к ImageMagick, но не к соседям по дому: `ai-image` умеет
+`resize`, `trim`, `pad`, `alpha`, `background`, `vectorize`, `info`, а `ai-measure` меряет
+картинки — и ни один из них не был доступен ролям. В webdev такая дверь уже была (шаг-90,
+`ai_cli` + `ai_cli_help`), и закон дома должен быть один на весь дом, а не по одному на пакет.
+
+Решение: дверь во **весь дом** — каталог `ai`, `ai-webdev`, `ai-decompose`, `ai-measure`,
+`ai-image`; роль — любая, кто работает с картинками: decomposer, rectifier, restorer, overlap,
+extender. Приёмная и директор без CLI: они судят прогон, а не картинку.
+
+- [x] `src/agent/cli-family.js` — каталог семейства: `FAMILY_CLIS` (команда, переменная
+      окружения, пакет, каталоги, точка входа, суть), `familyNames`, `familyCandidates`,
+      `resolveFamilyCli` (`.js` — тем же Node, `.cmd` — через `cmd.exe`, иначе `PATH`),
+      `runFamilyCli` (запуск без shell, таймаут 120 с, потолок 600 с, дерево процесса
+      снимается целиком), `familyPathArgs`, `familyOutputArg`, `familyDoc` (family | flags |
+      commands | all). Модуль автономен: своих `quoteWindowsArg` и `killTree`, потому что в
+      декомпозере нет `agent/programs.js`
+- [x] `src/agent/tool-specs.js` — инструменты `ai_cli` (cli, args, timeoutMs) и `ai_cli_help`
+      (topic), переключатель `tools.external_cli`; роли: decomposer, rectifier, restorer,
+      overlap, extender
+- [x] `src/agent/tools.js` — исполнитель: имя CLI из каталога, команды-серверы отклоняются
+      (`BLOCKING_COMMANDS`), каждый путь команды внутри корня прогона, `--out/--output`
+      проверяется по открытым стадией каталогам, запуск, ответ — код, stdout и stderr
+- [x] `src/roles/cli-note.js` — правило дома для инструкций роли: флаги не угадываются,
+      спрашивается у CLI (`--help` стоит ноль и зовёт никакой модели)
+- [x] `src/roles/{decomposer,rectifier,restorer,overlap,extender}.js` — правило подключено
+      к инструкциям пяти ролей
+- [x] `src/stages/decompose.js`, `src/stages/rectify.js`, `src/stages/reconstruct.js`,
+      `src/stages/overlap.js`, `src/stages/extension.js` — `ai_cli` и `ai_cli_help` в списках
+      инструментов, `extraTools` проброшены в роль, `setWriteDirs` открывает каталоги стадии
+- [x] `src/config/defaults.js` — `tools.external_cli: true`, `stages.extend.maxTurns: 4`,
+      `stages.reconstruct.maxTurns: 4`, `stages.overlap.maxTurns: 4`
+- [x] `src/config/validate.js` — `maxTurns` проверяется и у стадии `extend`
+- [x] `src/help.js` — справка: раздел «The CLIs of the house»; `src/index.js` и `index.js` —
+      публичный экспорт модуля семейства
+- [x] `test/cli-family.test.js` — 13 тестов: каталог, руководство, поиск путей и выхода,
+      запуск CLI, отказ чужому CLI, отказ пути вне корня, отказ команде-серверу, «не
+      установлен», переключатель `tools.external_cli`, список ролей
+- [x] README (EN) — раздел «The CLIs of the house»
+- [x] Проверка: `npm test` — 363 теста, все проходят
+
+**Долг, который принёс шаг.** У `restorer`, `overlap` и `extender` было `maxTurns: 1`, а
+`src/roles/index.js` передаёт `batchable: turns === 1` — один ход значит «весь вопрос роли»,
+и такой запрос идёт в пакетный маршрут. Роли с циклом инструментов больше не укладываются в
+один ход, поэтому эти три стадии **сняты с пакетного маршрута**: `batch.enabled` и `--batch`
+больше не ускоряют их. Потолок поднят до 4 ходов (`stages.<id>.maxTurns`), этого хватает на
+«спросил CLI — прочитал ответ — ответил»; роль, которой CLI не нужен, отвечает на первом
+ходе и лишних вызовов не делает. Пакетный маршрут остаётся у `decompose`, `rectify` и
+`reception`, где цикла инструментов нет.
+
+**Что осталось за скобками.** `ai` (umbrella) лежит не в `../..` от пакета, а в `PATH`
+(`Universal-AI/bin/ai.cmd`) — находят через `PATH` или `AI_BIN`, общий для webdev и
+декомпозера. Переменные `AI_BIN`, `AI_WEBDEV_BIN`, `AI_DECOMPOSE_BIN`, `AI_MEASURE_BIN`,
+`AI_IMAGE_BIN` в окружении не заданы — поиск идёт по соседним пакетам и по `PATH`.
+
+---
+
 ## Порядок работы и зависимости шагов
 
 ```
@@ -1577,7 +1635,8 @@ planned.md (RU). Проверка: `npm test` — 277 тестов, все пр�
   31–38 шаги c6–c9 (доступ, копии библиотеки, fallback, закон дома, офлайн-тесты)                       
   39 приёмная и мини-план: порядок стадий решает модель (после 12, 5)                                     
   40 градусы наклонов и матрицы 3x3/4x4 в rectifier (после 39)                                            
-  41 свободный ImageMagick для ролей, документация usage.imagemagick.org, maxPossibleTurns (после 39)    
+  41 свободный ImageMagick для ролей, документация usage.imagemagick.org, maxPossibleTurns (после 39)
+ 42 свободная дверь к CLI семейства ai-* (после 41: тот же закон, что и в webdev)
 ```
 
 ## Риски и заметки

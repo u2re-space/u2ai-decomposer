@@ -11,6 +11,7 @@
  * @ai.hint legacy-0.2
  */
 import { UNTRUSTED } from './untrusted.js';
+import { FAMILY_CLI_NOTE } from './cli-note.js';
 
 export const restorerInstructions = `You are the restorer. A sub-reference image stands for one screen of a design, and the measurer is
 about to read exact numbers out of it: box positions, paddings, font sizes, colours. Your job is to
@@ -63,6 +64,9 @@ Write each prompt so an editor understands it from the cut-out alone:
 - say what must not change.
 
 Return the required JSON: verdict, assessment, patches array, geometry.
+
+${FAMILY_CLI_NOTE}
+
 ${UNTRUSTED}`;
 
 /**

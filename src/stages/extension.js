@@ -21,10 +21,14 @@ import {
 import { imageModelFor, sniffImage } from '../openai/images.js';
 import { imagePart } from '../openai/responses.js';
 import { EXTEND_SCHEMA } from '../agent/schemas.js';
+import { toolSpecs } from '../agent/tool-specs.js';
 import { scratchDir as scratchDirOf } from '../shared/scratch.js';
 
 /** The directory under the work directory where the extended canvas is written. */
 export const EXTENDED_DIR = 'extended';
+
+/** The tools the extender may call: the house, and nothing that touches the pixels itself. */
+export const EXTENDER_TOOLS = ['ai_cli', 'ai_cli_help'];
 
 /** The edges the canvas may grow on. */
 export const GROWABLE_EDGES = Object.freeze(['top', 'right', 'bottom', 'left']);
@@ -331,7 +335,7 @@ export async function featherBand(bytes, side, overlap, engine) {
  * @param {Function} notify event callback
  */
 export async function runExtension(state, notify = () => {}) {
-    const { root, images, workDir, config, client, roles, model, effort, imageModel, warnings } = state;
+    const { root, images, workDir, config, client, roles, model, effort, imageModel, warnings, toolset } = state;
     if (!images?.length) {
         warnings.push('extension: no images to process');
         return;
@@ -350,6 +354,9 @@ export async function runExtension(state, notify = () => {}) {
     const settings = config.stages?.extend ?? {};
     const padFraction = Number(settings.padFraction ?? 0.125);
     const maxAttempts = Number.isSafeInteger(settings.maxAttempts) ? settings.maxAttempts : 2;
+    // The budget of the turns of the role: the ceiling is high enough for a call of a tool
+    // and the answer after it, and the role that needs no tool still answers on the first turn.
+    const maxTurns = Number.isSafeInteger(settings.maxTurns) ? Math.max(1, settings.maxTurns) : 4;
     const quality = settings.quality ?? null;
     const seamLimit = Number(config.image?.seamDeltaMin ?? 0.25);
     const seamFraction = Number(config.image?.seamBandFraction ?? 0.06);
@@ -366,6 +373,15 @@ export async function runExtension(state, notify = () => {}) {
     const scratchDir = path.join(scratchDirOf(state), 'extend');
     await mkdir(extDir, { recursive: true });
     await mkdir(scratchDir, { recursive: true });
+    // The files of the role and of the CLI of the house land in the directories of the stage.
+    toolset?.setWriteDirs?.([extDir, scratchDir]);
+    const extraTools = toolset?.specsFor
+        ? toolset.specsFor('extender', EXTENDER_TOOLS)
+        : toolSpecs(config.tools ?? {}, {
+            role: 'extender',
+            names: EXTENDER_TOOLS,
+            imageApi: Boolean(client?.images),
+        });
 
     for (const [index, img] of images.entries()) {
         const absolute = path.resolve(root, img);
@@ -385,7 +401,8 @@ export async function runExtension(state, notify = () => {}) {
             parts: [imagePart(bytes, sniffImage(bytes).mime)],
             schema: EXTEND_SCHEMA,
             schemaName: 'extendPlan',
-            maxTurns: 1,
+            maxTurns,
+            extraTools,
             model,
             effort,
         });

@@ -3,10 +3,12 @@
  * @purpose The executor of the tools: it runs the calls the model asks for inside the working
  *          directory and answers with a short text the model can read.
  * @depends image/raster, image/crop, openai/images, agent/tool-specs, agent/mcp, agent/paths,
- *   shared/house
- * @exports createToolset, toolSpecs, enabledToolNames
+ *   agent/cli-family, shared/house
+ * @exports createToolset, toolSpecs, enabledToolNames, BLOCKING_COMMANDS
  * @ai.hint keep
  * @ai.hint legacy-0.2
+ * @changed 2026-11-16 Свободная дверь к CLI семейства: `ai_cli` зовёт любой CLI дома с любым
+ *                       флагом, `ai_cli_help` даёт руководство по нему.
  */
 import path from 'node:path';
 import { readFile, mkdir } from 'node:fs/promises';
@@ -15,9 +17,44 @@ import { clampRect, cropRect } from '../image/crop.js';
 import { sniffImage } from '../openai/images.js';
 import { toolSpecs as buildSpecs } from './tool-specs.js';
 import { isInside, resolveInside } from './paths.js';
+import {
+    FAMILY_CLIS,
+    FAMILY_ROOT,
+    FAMILY_TIMEOUT_MS,
+    familyDoc,
+    familyNames,
+    familyOutputArg,
+    familyPathArgs,
+    resolveFamilyCli,
+    runFamilyCli,
+} from './cli-family.js';
 import { writeFileAtomic } from '../shared/house.js';
 
 export { toolSpecs, enabledToolNames } from './tool-specs.js';
+
+/**
+ * The commands that do not finish on their own.
+ *
+ * A server or a watcher holds the run until the timeout and brings nothing: the work of the
+ * run would wait for a process that was never going to end.
+ */
+export const BLOCKING_COMMANDS = /(?:python[0-9.]*\s+-m\s+http\.server|\bhttp-server\b|\blive-server\b|\bserve\b|(?:^|\s)(?:npx\s+)?vite\b(?!\s+build)|\bnpm\s+run\s+(?:dev|preview|serve|start)\b|\btail\s+-f\b)/i;
+
+/**
+ * The argument list of a tool: a JSON array of strings.
+ * @param {unknown} raw
+ * @returns {string[]}
+ * @ai.hint pure
+ */
+function parseArgsList(raw) {
+    if (Array.isArray(raw)) return raw.map((item) => String(item));
+    if (typeof raw !== 'string' || !raw.trim()) return [];
+    try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.map((item) => String(item));
+    } catch { /* not JSON: treat it as one argument */ }
+    return [raw];
+}
 
 /**
  * Turn a name into a token the API accepts.
@@ -63,10 +100,10 @@ export function mcpToolEntries(connections = []) {
  * writes has to land in one of the directories the current stage opened for writing. The stage
  * that runs the role decides where its artifacts may go; the executor refuses anything else.
  * @param {{ root: string, config: object, client?: object, role?: string|null, mcp?: object[],
- *   writeDirs?: string[] }} opts
+ *   writeDirs?: string[], env?: object }} opts
  * @returns {{ execute: (name: string, args: object) => Promise<string>, specs: object[], setWriteDirs: Function }}
  */
-export function createToolset({ root, config, client, role = null, mcp = [], writeDirs = null }) {
+export function createToolset({ root, config, client, role = null, mcp = [], writeDirs = null, env = process.env }) {
     const engine = config.raster?.engine ?? 'auto';
     const imageApi = Boolean(client?.images);
     const mcpTools = mcpToolEntries(mcp);
@@ -95,6 +132,23 @@ export function createToolset({ root, config, client, role = null, mcp = [], wri
      */
     async function writePath(value) {
         const located = await resolveInside(root, String(value ?? ''), { forWrite: true, allowRoot: false });
+        if (!allowed.some((dir) => isInside(dir, located.abs))) {
+            throw new Error(`Writing outside the output directory is forbidden: ${located.rel}`);
+        }
+        return located;
+    }
+
+    /**
+     * Resolve a directory the files of a command land in, and refuse the ones outside the
+     * allowed dirs.
+     *
+     * The root itself is allowed here: a command that writes into the working directory is
+     * the normal case, and the stage that opened the directories knows what it opened.
+     * @param {string} value
+     * @returns {Promise<{ abs: string, rel: string }>}
+     */
+    async function writeDirPath(value) {
+        const located = await resolveInside(root, String(value ?? ''), { forWrite: true, allowRoot: true });
         if (!allowed.some((dir) => isInside(dir, located.abs))) {
             throw new Error(`Writing outside the output directory is forbidden: ${located.rel}`);
         }
@@ -230,6 +284,55 @@ export function createToolset({ root, config, client, role = null, mcp = [], wri
                 const { magickDoc } = await import('../image/magick-docs.js');
                 return magickDoc(args.topic);
             }
+            case 'ai_cli': {
+                const name = String(args.cli ?? '').trim();
+                if (!name) return 'The CLI is not named.';
+                if (!FAMILY_CLIS[name]) {
+                    return `The CLI "${name}" is not one of the house: ${familyNames().join(', ')}. `
+                        + 'Read the manual with the tool `ai_cli_help`.';
+                }
+                const list = parseArgsList(args.args);
+                const line = [name, ...list].join(' ');
+                // A server or a watcher does not finish on its own: it would hold the run
+                // until the timeout, and the work of the run would wait for nothing.
+                if (BLOCKING_COMMANDS.test(line)) {
+                    return 'The command is not started: it does not finish on its own. '
+                        + 'Check the files of the project or start such a command in the background of a shell.';
+                }
+                // Every path of the command stays inside the root of the run.
+                for (const arg of familyPathArgs(list)) {
+                    try {
+                        await resolveInside(root, arg, { allowRoot: false });
+                    } catch (error) {
+                        return `The CLI "${name}": ${error.message}`;
+                    }
+                }
+                // The files of the result land in a directory the stage opened for writing.
+                const output = familyOutputArg(list);
+                if (output) {
+                    try {
+                        await writeDirPath(output);
+                    } catch (error) {
+                        return `The CLI "${name}": ${error.message}`;
+                    }
+                }
+                const found = await resolveFamilyCli(name, { root: FAMILY_ROOT, env });
+                if (!found) {
+                    const spec = FAMILY_CLIS[name];
+                    return `The CLI "${name}" is not installed: set ${spec.env} `
+                        + `or install ${spec.package ?? 'the package'}.`;
+                }
+                const timeoutMs = Number.isSafeInteger(Number(args.timeoutMs))
+                    ? Number(args.timeoutMs)
+                    : FAMILY_TIMEOUT_MS;
+                const result = await runFamilyCli({ found, args: list, cwd: root, env, timeoutMs });
+                const parts = [`${name} → code ${result.code ?? 0}${result.timedOut ? ' (the time is over)' : ''}`];
+                if (result.stdout.trim()) parts.push(result.stdout.trim());
+                if (result.stderr.trim()) parts.push(result.stderr.trim());
+                return parts.join('\n');
+            }
+            case 'ai_cli_help':
+                return familyDoc(args.topic);
             case 'generate_image': {
                 if (!client?.images) return 'Images API unavailable';
                 const { images } = await client.images.generate({

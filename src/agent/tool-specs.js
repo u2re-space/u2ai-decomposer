@@ -17,6 +17,8 @@
  * @ai.tags tools, specs, config
  * @ai.hint keep
  * @ai.hint legacy-0.2
+ * @changed 2026-11-16 Свободная дверь к CLI семейства: `ai_cli` зовёт любой CLI дома с любым
+ *                       флагом, `ai_cli_help` даёт руководство по нему.
  */
 
 const str = (description) => ({ type: 'string', description });
@@ -173,6 +175,49 @@ export const TOOL_SPECS = Object.freeze({
         },
         required: ['topic'],
         roles: ['extender', 'decomposer', 'rectifier', 'restorer'],
+    },
+    ai_cli: {
+        configKey: 'external_cli',
+        description: 'Call one of the CLIs of the house — ai, ai-webdev, ai-decompose, ai-measure, '
+            + 'ai-image — with the flags of its own command line. The arguments are exact: one '
+            + 'argument per element, without a shell. The neighbour `ai-image` makes and cuts '
+            + 'pictures, `ai-measure` measures them; ask a CLI for its flags instead of guessing '
+            + 'them: ["--help"] prints the whole table of the commands and the flags of the CLI, '
+            + '["--version"] prints the version, and both cost nothing. Every path of the command '
+            + 'stays inside the working directory, and the file that is written lands in the '
+            + 'directory the task names. Call ai_cli_help for the manual of the family.',
+        parameters: {
+            type: 'object',
+            properties: {
+                cli: str('The name of the CLI: ai, ai-webdev, ai-decompose, ai-measure or ai-image.'),
+                args: str('JSON array of the arguments of the CLI, as strings. '
+                    + 'For example ["--help"] or ["info", "screens/01-home.png"].'),
+                timeoutMs: int('How long the CLI may run. Default 120000.'),
+            },
+            required: ['cli'],
+            additionalProperties: false,
+        },
+        required: ['cli'],
+        roles: ['decomposer', 'rectifier', 'restorer', 'overlap', 'extender'],
+    },
+    ai_cli_help: {
+        configKey: 'external_cli',
+        description: 'The manual of the CLIs of the house: which CLI does what, the flags they '
+            + 'share, the flags of every one of them and the commands of every one of them.',
+        parameters: {
+            type: 'object',
+            properties: {
+                topic: {
+                    type: 'string',
+                    enum: ['family', 'flags', 'commands', 'all'],
+                    description: 'The part of the manual.',
+                },
+            },
+            required: ['topic'],
+            additionalProperties: false,
+        },
+        required: ['topic'],
+        roles: ['decomposer', 'rectifier', 'restorer', 'overlap', 'extender'],
     },
     generate_image: {
         configKey: 'image_generate',

@@ -11,6 +11,7 @@
  * @ai.hint legacy-0.2
  */
 import { UNTRUSTED } from './untrusted.js';
+import { FAMILY_CLI_NOTE } from './cli-note.js';
 
 export const rectifierInstructions = `You are the rectifier. A reference image is about to be measured: somebody will read box positions,
 paddings, font sizes and colours out of its pixels. Those numbers are true only when the screen in the
@@ -63,6 +64,8 @@ command line, and call magick_help when you do not remember an operator or the r
 "-deskew" straightens a picture that was shot at an angle, "-distort Perspective" puts a quadrilateral back
 into a rectangle, "-trim" cuts the frame away. Every path stays inside the working directory and the file
 that is written lands in the directory the task names.
+
+${FAMILY_CLI_NOTE}
 
 Return "keep" for a single flat screen. Return "unresolved" only when a projection was needed and
 not a single set of corners can be placed.

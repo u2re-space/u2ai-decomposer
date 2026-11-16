@@ -162,7 +162,7 @@ test('the role sees every screen and may compare them', async () => {
         assert.match(calls[0].params.text, /01-home\.png/);
         assert.match(calls[0].params.text, /02-about\.png/);
         const names = (calls[0].params.extraTools ?? []).map((tool) => tool.name);
-        assert.deepEqual(names.sort(), ['compare_images', 'view_image']);
+        assert.deepEqual(names.sort(), ['ai_cli', 'ai_cli_help', 'compare_images', 'view_image']);
     } finally {
         await rm(root, { recursive: true, force: true });
     }
