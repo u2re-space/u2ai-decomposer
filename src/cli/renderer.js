@@ -58,11 +58,33 @@ function printPlan(event) {
     console.log('Plan:');
     const images = Array.isArray(event.images) ? event.images : [];
     console.log(`  inputs: ${images.length ? images.join(', ') : '(none)'}`);
+    if (event.dynamic) {
+        console.log('  the reception decides the stages, their order and their parameters;');
+        console.log('  the list below is the usual one, not the plan of the run.');
+    }
     for (const stage of event.stages ?? []) {
         const models = [stage.model, stage.imageModel, stage.layerModel].filter(Boolean).join(', ');
         console.log(`  ${stage.id}: ${stage.label}${models ? ` [${models}]` : ''}`);
     }
     for (const output of event.outputs ?? []) console.log(`  output: ${output}`);
+}
+
+/**
+ * Print the plan of a run: the stages it names and the ones it leaves out.
+ *
+ * The plan is the answer of the reception, and the reader deserves to see it before the
+ * stages start: a run that is going to spend money says so first.
+ * @param {object} event
+ */
+function printPlanReady(event) {
+    const stages = Array.isArray(event.stages) ? event.stages : [];
+    const skipped = Array.isArray(event.skipped) ? event.skipped : [];
+    const summary = String(event.summary ?? '').trim();
+    if (summary) console.log(`Plan: ${summary}`);
+    else console.log('Plan:');
+    if (stages.length) console.log(`  stages: ${stages.join(' → ')}`);
+    if (skipped.length) console.log(`  skipped: ${skipped.join(', ')}`);
+    if (event.path) console.log(`  written to ${event.path}`);
 }
 
 /**
@@ -133,6 +155,9 @@ export function createPlainRenderer({ verbose = false } = {}) {
         switch (e.type) {
             case 'plan':
                 printPlan(e);
+                break;
+            case 'plan.ready':
+                printPlanReady(e);
                 break;
             case 'stage.start':
                 stage = e.stage ?? '';
@@ -424,6 +449,11 @@ export function createRenderer({ verbose = false } = {}) {
             case 'plan':
                 stopTicker();
                 printPlan(e);
+                break;
+            case 'plan.ready':
+                stopTicker();
+                printPlanReady(e);
+                startTicker();
                 break;
             case 'stage.start':
                 stopTicker();

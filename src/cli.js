@@ -39,9 +39,13 @@ export function stripDetach(argv) {
 }
 
 /**
- * Minimal argv parser for ai-decompose: image input, output dir, stages, config, model.
+ * Minimal argv parser for ai-decompose: image input, output dir, stages, config, model, task.
+ *
+ * The task of the run is the prompt: it may be given with `--prompt` or as a positional
+ * argument. The stages are not given by default: a run that was not told which stages to run
+ * asks the reception and follows the plan it answers with.
  * @param {string[]} argv
- * @returns {{ image: string[], out: string, config: string|null, stages: string[], model: string|null, effort: string|null, imageModel: string|null, configPath: string|null, verbose: boolean, aiMode: boolean }}
+ * @returns {{ image: string[], out: string, config: string|null, stages: string[]|null, model: string|null, effort: string|null, imageModel: string|null, configPath: string|null, verbose: boolean, prompt: string }}
  */
 export function parseArgv(argv) {
     const parsed = parseArgs({
@@ -50,6 +54,7 @@ export function parseArgv(argv) {
             out:      { type: 'string', short: 'o', default: '.' },
             config:   { type: 'string', short: 'c' },
             stages:   { type: 'string', multiple: true },
+            prompt:   { type: 'string', short: 'p' },
             model:    { type: 'string', short: 'm' },
             effort:   { type: 'string' },
             'image-model': { type: 'string' },
@@ -62,7 +67,6 @@ export function parseArgv(argv) {
             'stop-after': { type: 'string' },
             'batch': { type: 'boolean', default: false },
             'batch-fetch': { type: 'boolean', default: false },
-            'ai-mode': { type: 'boolean', default: false },
         },
         strict: false,
         allowPositionals: true,
@@ -70,11 +74,19 @@ export function parseArgv(argv) {
     });
 
     const image = parsed.values.image ?? [];
-    const stages = (parsed.values.stages ?? ['extend', 'decompose', 'rectify', 'reconstruct', 'overlap', 'resolve'])
-        .flatMap((value) => String(value).split(','))
-        .map((value) => value.trim())
-        .filter(Boolean);
+    // No `--stages` means the run decides by itself: the reception answers with the plan.
+    const stages = parsed.values.stages
+        ? parsed.values.stages
+            .flatMap((value) => String(value).split(','))
+            .map((value) => value.trim())
+            .filter(Boolean)
+        : null;
     const verbose = parsed.values.verbose === true && parsed.values['no-verbose'] !== true;
+    // The task of the run: the flag first, the positional argument after it.
+    const prompt = [parsed.values.prompt ?? '', ...(parsed.positionals ?? [])]
+        .map((value) => String(value).trim())
+        .filter(Boolean)
+        .join(' ');
 
     return {
         image,
@@ -93,8 +105,7 @@ export function parseArgv(argv) {
         stopAfter: parsed.values['stop-after'] ?? null,
         batch: parsed.values.batch === true,
         batchFetch: parsed.values['batch-fetch'] === true,
-        aiMode: parsed.values['ai-mode'] === true,
-        positionals: parsed.positionals,
+        prompt,
     };
 }
 
@@ -140,10 +151,7 @@ export async function main(argv = process.argv.slice(2)) {
     const opts = parseArgv(argv);
     let config;
     try {
-        // The one-shot switch of the rectify stage: `--ai-mode` turns the AI mode on for this
-        // run, whatever the config file says.
-        const overrides = opts.aiMode ? { stages: { rectify: { mode: 'ai-mode' } } } : {};
-        config = await loadConfig({ configPath: opts.configPath, cwd: process.cwd(), overrides });
+        config = await loadConfig({ configPath: opts.configPath, cwd: process.cwd() });
     } catch (error) {
         console.error(error?.message ?? String(error));
         return 1;
@@ -219,6 +227,7 @@ export async function main(argv = process.argv.slice(2)) {
             advanced: opts.advanced,
             stopAfter: opts.stopAfter,
             dryRun: opts.dryRun,
+            prompt: opts.prompt,
             notify: (event) => renderer.event(event),
         });
         // A stage that threw leaves the run unfinished: the exit code says so, and the pipeline

@@ -8,7 +8,16 @@ Multi-phase AI-agentic web-template (screenshot) image decomposer and restorer/e
 
 ## Pipeline
 
-Six stages run in sequence, each producing artifacts in `./decomposition/`:
+The order of the stages is not fixed. A run that was not told which stages to run begins with
+the **reception**: it looks at the picture and at the task and answers with the plan of the work
+— the stages, their order and their parameters. The plan is written to `decomposition/plan.json`,
+and the run follows it.
+
+The plan may not break the laws of the house: `decompose` (the stage that cuts the screens) and
+`resolve` (the stage that writes the answer) are always there, the stages that work on the
+screens come after the one that cuts them, and `resolve` comes last.
+
+The usual order — the fallback of a run without a plan — is the one below:
 
 ```
 original.png
@@ -56,9 +65,63 @@ original.png
 
 ```bash
 ai-decompose -i screenshot.png
+ai-decompose -i collage.png "cut this collage into screens and straighten them"
 ai-decompose -i collage.png --stages decompose,rectify
 ai-decompose -i original.png --advanced --out ./output
 ```
+
+The task of the run is the prompt: `--prompt` or a positional argument. It is what the
+reception reads when it decides what is going to be done to the picture.
+
+### The reception and the plan
+
+A run that was not told which stages to run begins with the reception. It gets the task and the
+reference — the picture itself, not a description of it — and answers with the plan of the work:
+
+- **steps** — the stages that are going to run, in the order they are going to run;
+- **skipped** — the stages that are left out, and why they are not needed;
+- **params** — the parameters of a stage: the quality of the answer of a stage that asks the
+  picture model (`low`, `medium`, `high`), the mode of `decompose` (`agent`, `inline`), the mode
+  of `rectify` (`geometry`, `ai-mode`), the number of passes of the restorer (`1..10`), the layer
+  split of the resolve stage (`true`, `false`).
+
+The plan is a draft, and the house checks it before the run follows it (`src/stages/plan.js`):
+
+- a stage that does not exist is dropped, and a stage named twice is kept once;
+- `decompose` and `resolve` are added back — without them there is nothing to continue from and
+  nothing to deliver;
+- the order is put right: `decompose` comes before the stages that work on the screens, and
+  `resolve` comes last;
+- a parameter that is not in the table of the stage is dropped with a warning, and a value that
+  is not one of the allowed ones is dropped too.
+
+The parameters of the plan are written into the **copy** of the settings of the run — the config
+of the user is never touched. The plan itself is written to `decomposition/plan.json`:
+
+```json
+{
+  "summary": "Three screens in one photo: cut them out and straighten them.",
+  "prompt": "cut this collage into screens and straighten them",
+  "steps": [
+    { "stage": "decompose", "why": "three screens", "params": {} },
+    { "stage": "rectify", "why": "the photo is tilted", "params": { "mode": "geometry" } },
+    { "stage": "resolve", "why": "the answer", "params": {} }
+  ],
+  "skipped": [
+    { "stage": "extend", "why": "nothing is cut through" },
+    { "stage": "reconstruct", "why": "nothing is broken" },
+    { "stage": "overlap", "why": "one screen" }
+  ],
+  "notes": []
+}
+```
+
+The reception has no tools at all: it plans the work, it does not do it. When it answers
+nothing, the run falls back to the usual work — every stage, in the usual order, with the
+settings of the config — and says so.
+
+`plan.enabled: false` in the config turns the reception off for good; `plan.maxTurns` is the
+budget of the role (4 by default).
 
 ### Running one stage on its own
 
@@ -123,6 +186,7 @@ destination must not exist unless `overwrite` is asked for.
 
 | Role | Stage | Purpose |
 |------|-------|---------|
+| `reception` | — | Read the task and the reference, answer with the plan of the work |
 | `extender` | extend | Decide if the frame needs growing and on which edges; write the band instruction |
 | `decomposer` | decompose | Name screens, crop/restore sub-references |
 | `rectifier` | rectify | Place quad corners, call `correct_perspective` |
@@ -258,9 +322,9 @@ of the files follows every branch, so the answer names every screen of the colla
 
 ### The AI mode of the rectify stage
 
-`stages.rectify.mode` says who straightens the picture. The default, `geometry`, keeps the role
-where it belongs: it names the four corners of every screen and the harness projects the pixels.
-`ai-mode` puts the AI in front of the whole reference and keeps the geometry behind it:
+The mode says who straightens the picture. `geometry` keeps the role where it belongs: it names
+the four corners of every screen and the harness projects the pixels. `ai-mode` puts the AI in
+front of the whole reference and keeps the geometry behind it:
 
 1. **The AI straightens the reference first.** The reference is sent to the image editor as a whole
    picture, and the answer is measured: the residual tilt of the straightened picture has to be no
@@ -286,13 +350,13 @@ where it belongs: it names the four corners of every screen and the harness proj
    is not paid for twice. The knob `stages.rectify.cleanOverlap` (`true` by default) turns the
    step off — then the separate stage does the work as usual.
 
-The mode is a setting of the stage:
+The mode is a setting of the stage, and the plan of a run may name a mode of its own:
 
 ```json
 {
   "stages": {
     "rectify": {
-      "mode": "ai-mode",
+      "mode": "auto",
       "straightenAttempts": 1,
       "maxRepairPasses": 2,
       "maxPatches": 3,
@@ -304,7 +368,10 @@ The mode is a setting of the stage:
 }
 ```
 
-The same thing for one run only is the flag `--ai-mode`; it wins over the config file.
+`auto` is the default. The plan decides the mode of a run; without a plan the run asks the
+picture model when there is one (`ai-mode`) and falls back to the geometry when there is not
+(`geometry`). The value of the config is the fallback of the runs that were not planned — the
+plan of a run wins over it.
 
 ### Restoring a screen (reconstruct)
 
@@ -392,6 +459,11 @@ Done.
 split is slow or fails.
 
 ### The layer split (advanced mode)
+
+The split happens only when somebody asked for it: `--advanced`, or `stages.resolve.layers` is
+`true` in the config, or the plan of the run asks for the layers **and** the task says so in
+words (`layers`, `layered`, «послойно», «слои»). A plan that asks for the split on its own is
+refused, with a warning: the split is expensive and it changes the shape of the delivery.
 
 `--advanced` splits one screen into layers. There are two sources:
 
@@ -546,6 +618,14 @@ middle leaves the old file and not a broken one.
 - Backends, imagesBackends and layerBackends pools
 - fallback.models: the models that get a picture request when every host refused the model
 - output.work: where the state of a run goes: `.ai/tmp/` by default. It dies with the run.
+- plan.enabled / plan.maxTurns: the reception of the run and its budget
+
+The section of the plan:
+
+| Field | Meaning | Default |
+|-------|---------|---------|
+| `enabled` | Ask the reception for the plan of the run before the pipeline starts | `true` |
+| `maxTurns` | The budget of the reception role | `4` |
 
 The section of the resolve stage:
 

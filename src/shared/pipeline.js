@@ -1,9 +1,18 @@
 /**
  * @file src/shared/pipeline.js
  * @module shared/pipeline
- * @purpose Pipeline orchestrator: runs stages in order, passes artifacts between them.
- * @depends node:path, node:fs/promises, node:crypto, shared/manifest, shared/resume, shared/house
- * @exports STAGES, runPipeline, newRunId
+ * @purpose Pipeline orchestrator: asks for the plan of the run, runs the stages in the order
+ *          that plan names, and passes artifacts between them.
+ *
+ *   The order of the stages is not fixed any more. A run that was not told which stages to run
+ *   asks the reception first: it reads the task and the reference and answers with the stages,
+ *   their order and their parameters. A run that was told (`--stages`) follows the list it was
+ *   given. The plan of a run is written to `decomposition/plan.json`, so the run that follows
+ *   it and the run that continues it read the same one.
+ *
+ * @depends node:path, node:fs/promises, node:crypto, shared/manifest, shared/resume, shared/house,
+ *   stages/plan, stages/reception
+ * @exports STAGES, runPipeline, runStages, newRunId
  * @ai.tags pipeline, stages
  * @ai.hint keep
  */
@@ -20,7 +29,9 @@ import { publishDelivery } from '../stages/publish.js';
 import { BATCH_SUBMITTED } from '../openai/batch.js';
 import { saveStageManifest } from './manifest.js';
 import { resumeFromWorkDir } from './resume.js';
-import { runStateDir } from './house.js';
+import { runStateDir, writeFileAtomic } from './house.js';
+import { runReception } from '../stages/reception.js';
+import { PLAN_FILE, applyPlan, defaultPlan, mentionsLayers } from '../stages/plan.js';
 
 /**
  * Ordered stage definitions.
@@ -46,22 +57,52 @@ export function newRunId() {
 }
 
 /**
+ * The stage of this id, or null.
+ * @param {string} id
+ * @returns {{ id: string, label: string, run: Function }|null}
+ * @ai.hint pure
+ */
+function stageOf(id) {
+    return STAGES.find((stage) => stage.id === id) ?? null;
+}
+
+/**
+ * Write the plan of the run next to the artifacts it describes.
+ *
+ * The plan is a file of the run: the reader may want to know why a stage was skipped, and the
+ * run that continues this one reads the same plan.
+ * @param {string} root the root of the project
+ * @param {string} workDir the delivery directory of the run, relative to the root
+ * @param {object} plan the plan of the run
+ * @returns {Promise<string>} the path of the plan, relative to the root
+ * @ai.hint io
+ */
+async function writePlan(root, workDir, plan) {
+    const planPath = path.resolve(root, workDir, PLAN_FILE);
+    await mkdir(path.dirname(planPath), { recursive: true });
+    await writeFileAtomic(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+    return path.relative(root, planPath).split(path.sep).join('/');
+}
+
+/**
  * Execute the pipeline stages in order.
  * @param {{
- *   root: string, images: string[], outDir: string, stages: string[],
+ *   root: string, images: string[], outDir: string, stages: string[]|null,
  *   config: object, client: object, model?: string|null, effort?: string|null,
  *   imageModel?: string|null, advanced?: boolean, stopAfter?: string|null,
- *   dryRun?: boolean, notify?: (event: object) => void
+ *   dryRun?: boolean, prompt?: string, notify?: (event: object) => void
  * }} opts
+ *   `stages: null` means the run decides the stages by itself: the reception answers with the
+ *   plan of the work.
  * @returns {Promise<{ output: object, warnings: string[] }>}
  */
 export async function runPipeline({
     root, images, outDir = '.', stages: requestedStages,
     config, client, model = null, effort = null, imageModel = null,
-    advanced = false, stopAfter = null, dryRun = false, notify = () => {},
+    advanced = false, stopAfter = null, dryRun = false, prompt = '', notify = () => {},
 }) {
     const skills = {};
-    for (const role of ['extender', 'decomposer', 'rectifier', 'restorer', 'overlap', 'director']) {
+    for (const role of ['reception', 'extender', 'decomposer', 'rectifier', 'restorer', 'overlap', 'director']) {
         const packs = await loadSkills({ dir: config?.skills?.dir ?? null, role });
         if (packs.length) {
             skills[role] = packs
@@ -95,44 +136,6 @@ export async function runPipeline({
     const scratchDir = runStateDir(root, runId, config);
     if (!dryRun) await mkdir(scratchDir, { recursive: true });
 
-    // Filter stages to run.
-    const selected = requestedStages ?? STAGES.map((stage) => stage.id);
-    const toRun = STAGES.filter((stage) => (
-        selected.includes(stage.id)
-        && config?.stages?.[stage.id]?.enabled !== false
-    ));
-    if (stopAfter) {
-        const stopIdx = toRun.findIndex((s) => s.id === stopAfter);
-        if (stopIdx >= 0) toRun.length = stopIdx + 1;
-    }
-
-    if (dryRun) {
-        const outputs = toRun.map((stage) => (
-            stage.id === 'resolve'
-                ? path.join(outDir, DECOMPOSITION_FILE)
-                : path.join(workDir, STAGE_DIRS[stage.id] ?? stage.id)
-        ));
-        notify({
-            type: 'plan',
-            images,
-            stages: toRun.map((stage) => {
-                const role = roles.resolve(STAGE_ROLES[stage.id]);
-                return {
-                    id: stage.id,
-                    label: stage.label,
-                    model: role.model,
-                    imageModel: role.imageModel ?? imageModel ?? config?.imageModel ?? null,
-                    // The layer split is a route of its own: its model is worth showing.
-                    layerModel: (advanced && stage.id === 'resolve')
-                        ? (config?.stages?.resolve?.layerModel ?? null)
-                        : null,
-                };
-            }),
-            outputs,
-        });
-        return { output: null, warnings: [], failed: false };
-    }
-
     // Shared state passed between stages.
     const state = {
         root,
@@ -154,6 +157,10 @@ export async function runPipeline({
         imageModel,
         advanced,
         dryRun,
+        // The task of the run: the text the reception reads and the plan is made of.
+        prompt: String(prompt ?? ''),
+        // The plan of the run, filled in below.
+        plan: null,
         extended: [],
         canvas: [],
         screens: [],
@@ -168,6 +175,97 @@ export async function runPipeline({
         decomposition: null,
         warnings: [],
     };
+
+    // --- the plan of the run ------------------------------------------------------
+    // A run that was told which stages to run follows that list. A run that was not asks the
+    // reception: it reads the task and the reference and answers with the plan of the work.
+    const planned = !Array.isArray(requestedStages);
+    let plan = null;
+    if (planned && !dryRun && config?.plan?.enabled !== false) {
+        try {
+            plan = await runReception(state, notify);
+        } catch (error) {
+            state.warnings.push(`reception: ${error?.message ?? error}`);
+        }
+    }
+    if (!plan) {
+        const ids = planned
+            ? STAGES.map((stage) => stage.id).filter((id) => config?.stages?.[id]?.enabled !== false)
+            : requestedStages;
+        plan = defaultPlan(ids, state.prompt);
+    }
+    state.plan = plan;
+
+    // The parameters of the plan go into the copy of the settings of this run: the config of
+    // the user is not touched.
+    const layersAllowed = Boolean(
+        advanced
+        || config?.stages?.resolve?.layers === true
+        || mentionsLayers(state.prompt),
+    );
+    const applied = applyPlan(config, plan, { layersAllowed });
+    state.config = applied.config;
+    for (const message of applied.warnings) state.warnings.push(`plan: ${message}`);
+
+    // --- the stages of the run ----------------------------------------------------
+    let toRun;
+    if (planned) {
+        toRun = plan.steps
+            .map((step) => stageOf(step.stage))
+            .filter(Boolean)
+            .filter((stage) => config?.stages?.[stage.id]?.enabled !== false);
+    } else {
+        toRun = STAGES.filter((stage) => (
+            requestedStages.includes(stage.id)
+            && config?.stages?.[stage.id]?.enabled !== false
+        ));
+    }
+    if (stopAfter) {
+        const stopIdx = toRun.findIndex((s) => s.id === stopAfter);
+        if (stopIdx >= 0) toRun.length = stopIdx + 1;
+    }
+
+    // --- the dry run ---------------------------------------------------------------
+    if (dryRun) {
+        const outputs = toRun.map((stage) => (
+            stage.id === 'resolve'
+                ? path.join(outDir, DECOMPOSITION_FILE)
+                : path.join(workDir, STAGE_DIRS[stage.id] ?? stage.id)
+        ));
+        notify({
+            type: 'plan',
+            images,
+            // The reception is not called in a dry run: it costs a call, and the dry run exists
+            // to show the shape of the work without paying for it.
+            dynamic: planned,
+            stages: toRun.map((stage) => {
+                const role = roles.resolve(STAGE_ROLES[stage.id]);
+                return {
+                    id: stage.id,
+                    label: stage.label,
+                    model: role.model,
+                    imageModel: role.imageModel ?? imageModel ?? config?.imageModel ?? null,
+                    // The layer split is a route of its own: its model is worth showing.
+                    layerModel: (advanced && stage.id === 'resolve')
+                        ? (config?.stages?.resolve?.layerModel ?? null)
+                        : null,
+                };
+            }),
+            outputs,
+        });
+        return { output: null, warnings: [], failed: false };
+    }
+
+    // The plan is written down before the first stage runs: the reader may want to know what
+    // the run is going to do, and the run that continues this one reads the same file.
+    const planPath = await writePlan(root, workDir, plan);
+    notify({
+        type: 'plan.ready',
+        summary: plan.summary,
+        stages: plan.steps.map((step) => step.stage),
+        skipped: plan.skipped.map((item) => item.stage),
+        path: planPath,
+    });
 
     // A run that starts in the middle of the pipeline continues from the artifacts of the last
     // one: the stages before it are not repeated, they cost money and their answer is on disk.

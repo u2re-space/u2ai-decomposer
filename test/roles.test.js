@@ -99,6 +99,33 @@ test('an unknown role is refused', async () => {
     assert.match(result.error, /Unknown role/);
 });
 
+test('a call of the schema is the answer of the role, not a request for a tool', async () => {
+    const { client, calls } = mockClient({
+        id: 'resp_1',
+        status: 'completed',
+        model: 'm',
+        output: [{
+            type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'plan',
+            arguments: '{"summary":"cut it"}',
+        }],
+    });
+    const executed = [];
+    const toolset = {
+        specs: [],
+        async execute(name, args) { executed.push({ name, args }); return 'done'; },
+    };
+    const runner = createRoleRunner({ client, config: { model: 'm', roles: {} }, toolset });
+    const result = await runner.run('reception', {
+        text: 'plan the work',
+        schema: { type: 'object', properties: { summary: { type: 'string' } } },
+        schemaName: 'plan',
+        maxTurns: 3,
+    });
+    assert.equal(calls.length, 1, 'the answer was enough');
+    assert.deepEqual(result.data, { summary: 'cut it' });
+    assert.deepEqual(executed, [], 'the schema is not a tool of the run');
+});
+
 test('the tool loop runs the calls of the model and feeds the results back', async () => {
     const answers = [
         {

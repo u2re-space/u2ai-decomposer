@@ -264,7 +264,10 @@ test('there is no mode switch left: a stage is either on or off', () => {
     // The only modes that survived are the ones that name a different kind of work, not a
     // different amount of it: who cuts the screens, and who straightens the reference.
     assert.deepEqual(defaults.stages.decompose.mode, 'agent');
-    assert.deepEqual(defaults.stages.rectify.mode, 'geometry');
+    // The mode of the rectify stage is `auto` by default: the plan of the run decides, and
+    // without a plan the AI mode is used when a picture model is there, the geometry when
+    // it is not.
+    assert.deepEqual(defaults.stages.rectify.mode, 'auto');
 });
 
 // ---------------------------------------------------------------------------

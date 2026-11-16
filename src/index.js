@@ -33,6 +33,8 @@ export * from './shared/pipeline.js';
 export * from './shared/house.js';
 export * from './shared/scratch.js';
 export * from './stages/index.js';
+export * from './stages/plan.js';
+export * from './stages/reception.js';
 export * from './stages/extension.js';
 export * from './stages/decompose.js';
 export * from './stages/decompose-screens.js';

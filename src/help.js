@@ -9,14 +9,18 @@
 export const HELP = `ai-decompose — multi-phase AI-agentic image decomposer
 
 Usage:
-  ai-decompose [options]
+  ai-decompose [options] [task]
 
 Options:
   -i, --image <path>      Input reference image(s). Can be specified multiple times.
   -o, --out <dir>         Output directory (default: .).
   -c, --config <path>     Path to ~/.ai-decompose/config.json.
+  -p, --prompt <text>     The task of the run: what is going to be done to the picture.
+                          May also be given as a positional argument.
   --stages <name,...>     Comma-separated list of stages to run.
-                          Default: extend,decompose,rectify,reconstruct,overlap,resolve
+                          Without this flag the run asks the reception and follows the
+                          plan it answers with: the stages, their order and their
+                          parameters are decided by the task and the picture.
                           Available: extend, decompose, rectify, reconstruct, overlap, resolve
                           A stage may run alone: it takes the screens of the last run
                           from the work directory and the stages before it are not repeated.
@@ -29,13 +33,23 @@ Options:
   --batch                 Submit the requests of the parallel rounds as one batch
                           and stop: the answers are not here yet.
   --batch-fetch           Take the answers of the submitted batches and go on.
-  --ai-mode               Run the rectify stage in the AI mode: the AI straightens the
-                          reference first, the cut is still made by the geometry, and
-                          what is still broken is repaired by fragments.
-                          The same as stages.rectify.mode = "ai-mode" in the config.
   -v, --verbose           Verbose output.
   -h, --help              Show this help message.
   --version               Show version.
+
+The reception and the plan:
+  A run that was not told which stages to run begins with the reception: it looks at
+  the picture and at the task and answers with the plan of the work — the stages that
+  are going to run, their order and their parameters. The plan is written to
+  decomposition/plan.json, and the run follows it.
+
+  The house keeps its rules whatever the plan says:
+  - decompose and resolve are always there: the screens have to be cut and the answer
+    has to be written.
+  - the stages that work on the screens come after the stage that cuts them;
+  - resolve comes last.
+  - the layer split happens only when somebody asked for it: the task says so, or
+    stages.resolve.layers is true, or --advanced is given.
 
 Pipeline stages:
   extend          Grow reference frame if content is cut through real content.
@@ -44,10 +58,13 @@ Pipeline stages:
   rectify         Un-rotate / recover projection, cut collages into screens.
                   The role checks its own cut and cuts it again when a screen
                   lost its edges.
-                  With stages.rectify.mode = "ai-mode" (or --ai-mode) the AI
-                  straightens the reference first, the cut is still made by the
-                  geometry, the broken parts are repaired by fragments, and the
-                  content of the neighbouring screens is removed in the same stage.
+                  The mode is the plan's decision: geometry places the corners and
+                  projects the pixels; ai-mode lets the picture model straighten the
+                  reference first, the cut is still made by the geometry, the broken
+                  parts are repaired by fragments, and the content of the neighbouring
+                  screens is removed in the same stage. Without a decision the mode
+                  is auto: ai-mode when a picture model is there, geometry when it
+                  is not.
   reconstruct     Restore lost details via AI box-patch and verify.
                   The role names the tilt and the size of the screen, the
                   harness corrects the pixels and rolls the correction back
@@ -76,6 +93,8 @@ Config:
   serve seedream-5.5 (APIMart by default, key in APIMART_API_KEY), and
   stages.resolve.layerModel names the model. Without a key the text role
   splits the screen instead.
+  plan.enabled turns the reception off: the run then does the usual work.
+  plan.maxTurns is the budget of the reception.
 
 Batch:
   The hosts that serve the batch route carry the flag "supports": { "batch": true }
@@ -87,6 +106,7 @@ Batch:
 
 Examples:
   ai-decompose -i screenshot.png
+  ai-decompose -i collage.png "cut this collage into screens and straighten them"
   ai-decompose -i collage.png --stages decompose,rectify
   ai-decompose -i original.png --advanced --out ./output
 `;

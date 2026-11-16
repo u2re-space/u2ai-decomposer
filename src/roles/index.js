@@ -16,6 +16,7 @@ import { restorerInstructions, restorerVerifyInstructions } from './restorer.js'
 import { rectifyRepairInstructions } from './rectify-repair.js';
 import { overlapInstructions } from './overlap.js';
 import { directorInstructions } from './director.js';
+import { receptionInstructions } from './reception.js';
 import { parseResponse } from '../openai/responses.js';
 import { BATCH_SUBMITTED } from '../openai/batch.js';
 import { getModelProfile, snapEffort } from '../model/profiles.js';
@@ -33,6 +34,7 @@ export const ROLE_INSTRUCTIONS = Object.freeze({
     rectifyRepair: rectifyRepairInstructions,
     overlap: overlapInstructions,
     director: directorInstructions,
+    reception: receptionInstructions,
 });
 
 /**
@@ -177,16 +179,22 @@ export function createRoleRunner({ client, config = {}, model = null, effort = n
                 });
                 const parsed = parseResponse(answer);
                 last = parsed;
-                for (const call of parsed.toolCalls) trace.push({ tool: call.name, args: call.arguments });
+                // The schema is a tool of the API, not a tool of the run: a call of that name
+                // carries the answer of the role, not a request for something.
+                const answerName = schemaName ?? 'response';
+                const answerCall = parsed.toolCalls.find((call) => call.name === answerName);
+                if (answerCall && !parsed.data) parsed.data = answerCall.arguments;
+                const calls = parsed.toolCalls.filter((call) => call.name !== answerName);
+                for (const call of calls) trace.push({ tool: call.name, args: call.arguments });
                 notifyRole('role.done', {
                     role: name, model: parsed.model ?? role.model, status: parsed.status,
-                    usage: parsed.usage, toolCalls: parsed.toolCalls.length,
+                    usage: parsed.usage, toolCalls: calls.length,
                 });
 
-                if (!parsed.toolCalls.length || !toolset) break;
+                if (!calls.length || !toolset) break;
 
                 // Run the calls and feed the results back to the model.
-                for (const [index, call] of parsed.toolCalls.entries()) {
+                for (const [index, call] of calls.entries()) {
                     const callId = call.callId ?? call.id ?? `call_${turn}_${index}`;
                     let output = '';
                     try {

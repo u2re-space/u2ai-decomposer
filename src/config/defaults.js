@@ -177,6 +177,21 @@ export const defaults = {
     seamBandFraction: 0.06,
   },
 
+  // --- plan -------------------------------------------------------------------
+  /**
+   * The reception of a run: it reads the task and the reference and answers with the plan
+   * of the work — the stages, their order and their parameters.
+   *
+   * The plan is not the whim of the model: the stages every run needs are added back, the
+   * stages that do not exist are dropped and the order is put right (`stages/plan.js`).
+   */
+  plan: {
+    /** Ask the reception for the plan of the run before the pipeline starts. */
+    enabled: true,
+    /** Max agent turns for the reception role. */
+    maxTurns: 4,
+  },
+
   // --- stages -----------------------------------------------------------------
   stages: {
     extend: {
@@ -212,11 +227,15 @@ export const defaults = {
     rectify: {
       enabled: true,
       /**
+       * `auto` — the AI mode when the picture model is there, the geometry when it is not.
        * `geometry` — the role places the corners and the harness projects the pixels.
        * `ai-mode` — the AI straightens the reference first, the cut is still made by the
        * geometry, and what is still broken is repaired by fragments.
+       *
+       * The plan of a run may name a mode of its own; the value here is the fallback of the
+       * runs that were not planned.
        */
-      mode: 'geometry',
+      mode: 'auto',
       /** Max agent turns for the un-rotate/recover-projection pass. */
       maxTurns: 24,
       /** Max agent turns for the per-screen split pass. */
@@ -326,6 +345,7 @@ export const defaults = {
     restorer: {},
     overlap: {},
     director: {},
+    reception: {},
   },
 
   /** Extra named roles merged into the role registry at load. */

@@ -1,12 +1,14 @@
 /**
  * @file src/agent/schemas.js
  * @module agent/schemas
- * @purpose JSON schemas for AI role responses: decomposer, extender, rectifier, restorer.
- * @exports SUB_REFERENCE_KINDS, DECOMPOSER_KINDS, DECOMPOSER_SCHEMA, DECOMPOSER_INLINE_SCHEMA, EXTEND_SCHEMA, RECTIFY_SCHEMA, RECTIFY_REVIEW_SCHEMA, RECTIFY_REPAIR_SCHEMA, RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA
+ * @purpose JSON schemas for AI role responses: decomposer, extender, rectifier, restorer, reception.
+ * @exports SUB_REFERENCE_KINDS, DECOMPOSER_KINDS, DECOMPOSER_SCHEMA, DECOMPOSER_INLINE_SCHEMA, EXTEND_SCHEMA, RECTIFY_SCHEMA, RECTIFY_REVIEW_SCHEMA, RECTIFY_REPAIR_SCHEMA, RESTORE_SCHEMA, RESTORE_VERIFY_SCHEMA, PLAN_SCHEMA
  * @ai.tags schema
  * @ai.hint keep
  * @ai.hint legacy-0.2
  */
+
+import { ENUMS } from '../config/constants.js';
 
 const string = { type: 'string' };
 const strings = { type: 'array', items: string };
@@ -270,3 +272,53 @@ export const LAYERS_SCHEMA = object({
         }),
     },
 });
+
+/**
+ * The answer of the reception: the plan of the work.
+ *
+ * The stages are named by their ids, the order is the order they are going to run in, and the
+ * parameters of a stage are the ones the house allows. The plan is checked against the rules of
+ * the house before it is followed (`stages/plan.js`): a stage that cannot be left out is added
+ * back, a stage that does not exist is dropped, and the order is put right.
+ */
+export const PLAN_SCHEMA = {
+    type: 'object',
+    properties: {
+        summary: { ...string, description: 'What this run is going to do, in one or two sentences.' },
+        steps: {
+            type: 'array',
+            description: 'The stages that are going to run, in the order they are going to run.',
+            items: {
+                type: 'object',
+                properties: {
+                    stage: { type: 'string', enum: ENUMS.stages, description: 'The stage of this step.' },
+                    why: { ...string, description: 'What this stage is for in this run, in one line.' },
+                    params: {
+                        type: 'object',
+                        description: 'The parameters of the stage: quality, mode, maxPasses, layers. '
+                            + 'Only the parameters the stage accepts are applied.',
+                        additionalProperties: true,
+                    },
+                },
+                required: ['stage', 'why', 'params'],
+                additionalProperties: false,
+            },
+        },
+        skipped: {
+            type: 'array',
+            description: 'The stages that are left out, and why they are not needed.',
+            items: {
+                type: 'object',
+                properties: {
+                    stage: { type: 'string', enum: ENUMS.stages, description: 'The stage that is left out.' },
+                    why: { ...string, description: 'Why this stage is not needed in this run.' },
+                },
+                required: ['stage', 'why'],
+                additionalProperties: false,
+            },
+        },
+        notes: { ...strings, description: 'Anything else the run should know.' },
+    },
+    required: ['summary', 'steps', 'skipped', 'notes'],
+    additionalProperties: false,
+};

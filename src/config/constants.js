@@ -27,8 +27,13 @@ export const ENUMS = Object.freeze({
   /** Pipeline stages in execution order. */
   stages: Object.freeze(['extend', 'decompose', 'rectify', 'reconstruct', 'overlap', 'resolve']),
   decomposerModes: Object.freeze(['agent', 'inline']),
-  /** The modes of the rectify stage: geometry only, or geometry with the AI in the loop. */
-  rectifyModes: Object.freeze(['geometry', 'ai-mode']),
+  /**
+   * The modes of the rectify stage:
+   * `auto` — the AI mode when the picture model is there, the geometry when it is not;
+   * `geometry` — the role places the corners and the harness projects the pixels;
+   * `ai-mode` — the AI straightens the whole reference first and keeps the geometry behind it.
+   */
+  rectifyModes: Object.freeze(['auto', 'geometry', 'ai-mode']),
   /** Where the layers of the advanced mode come from. */
   layerSources: Object.freeze(['auto', 'seedream', 'director']),
   /** The tiers the seedream decomposition accepts; ratios and pixel frames are refused. */
@@ -38,7 +43,7 @@ export const ENUMS = Object.freeze({
 
 /** Role names that always exist; user roles are validated against the schema only. */
 export const BUILTIN_ROLE_NAMES = Object.freeze([
-  'default', 'extender', 'decomposer', 'rectifier', 'restorer', 'overlap', 'director',
+  'default', 'extender', 'decomposer', 'rectifier', 'restorer', 'overlap', 'director', 'reception',
 ]);
 
 /** Alias spellings accepted in backend `supports` maps. */

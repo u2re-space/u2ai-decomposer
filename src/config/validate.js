@@ -260,6 +260,11 @@ export function validateConfig(config) {
   }
   for (const id of ENUMS.stages) validateStage(id, c.stages[id], fail);
 
+  if (!isRecord(c.plan)) fail('plan должен быть объектом');
+  for (const key of Object.keys(c.plan)) if (!(key in defaults.plan)) fail(`plan.${key}: неизвестное поле`);
+  if (typeof c.plan.enabled !== 'boolean') fail('plan.enabled: true | false');
+  if (!(Number.isSafeInteger(c.plan.maxTurns) && c.plan.maxTurns > 0)) fail('plan.maxTurns: целое > 0');
+
   if (!isRecord(c.output)) fail('output должен быть объектом');
   for (const key of ['dir', 'file', 'work']) {
     if (typeof c.output[key] !== 'string' || !c.output[key].trim()) fail(`output.${key}: непустая строка`);
