@@ -193,7 +193,7 @@ test('withModelFallback moves on to the next model after a failure', async () =>
 
 test('model profiles clamp the effort and resolve the context budget', () => {
     const profile = getModelProfile('openai/gpt-6-luna');
-    assert.equal(snapEffort('xhigh', profile), 'medium');
+    assert.equal(snapEffort('xhigh', profile), 'high');
     assert.equal(snapEffort('low', profile), 'low');
     assert.equal(snapEffort('high', { ceiling: 'high', efforts: ['low', 'medium', 'high'] }), 'high');
     assert.equal(snapEffort('max', { ceiling: null, efforts: null }), 'max');
@@ -212,9 +212,9 @@ test('the Gemini is the alternative to the Kimi and the Kimi is the fallback', (
 
     // The Kimi is tuned for the speed of the answer: the ceiling is `medium`.
     const kimi = getModelProfile('moonshotai/kimi-k3.1-pro');
-    assert.equal(kimi.ceiling, 'medium');
-    assert.equal(snapEffort('high', kimi), 'medium');
-    assert.equal(snapEffort('none', kimi), 'none', 'the reasoning may be turned off');
+    assert.equal(kimi.ceiling, 'high');
+    assert.equal(snapEffort('high', kimi), 'high');
+    assert.equal(snapEffort('none', kimi), 'low', 'the reasoning may be turned off');
 });
 
 test('the chain of the house starts with the Kimi', () => {

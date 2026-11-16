@@ -31,10 +31,10 @@ import { ENUMS } from '../config/constants.js';
 export const MODEL_PROFILES = Object.freeze({
     'minimax/minimax-m3.1-flash': { window: 4_194_304, maxOutput: 524_288, ceiling: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'] },
     'google/gemini-4-hydrogen': { window: 4_194_304, maxOutput: 1_048_576, ceiling: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'] },
-    'moonshotai/kimi-k3.1-pro': { window: 4_194_304, maxOutput: 944_000, ceiling: 'medium', efforts: ['none', 'low', 'medium'] },
+    'moonshotai/kimi-k3.1-pro': { window: 4_194_304, maxOutput: 944_000, ceiling: 'high', efforts: ['low', 'medium', 'high'] },
     'openai/gpt-6.1-sol': { window: 4_194_304, maxOutput: 32_768, ceiling: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'] },
     'openai/gpt-6.1-terra': { window: 2_097_152, maxOutput: 16_384, ceiling: 'high', efforts: ['low', 'medium', 'high'] },
-    'openai/gpt-6-luna': { window: 1_048_576, maxOutput: 8_192, ceiling: 'medium', efforts: ['low', 'medium'] },
+    'openai/gpt-6-luna': { window: 1_048_576, maxOutput: 8_192, ceiling: 'high', efforts: ['low', 'medium', 'high'] },
     'openai/gpt-image-2.6-sunburst': { window: 0, maxOutput: 0, ceiling: null, efforts: [] },
 });
 
@@ -42,7 +42,7 @@ export const MODEL_PROFILES = Object.freeze({
 const DEFAULT_PROFILE = Object.freeze({
     window: 131_072,
     maxOutput: 16_384,
-    ceiling: 'medium',
+    ceiling: 'high',
     efforts: ['low', 'medium', 'high'],
 });
 

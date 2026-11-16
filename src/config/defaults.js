@@ -27,7 +27,7 @@ export const defaults = {
   maxOutputTokens: null,
   /** Per-model ceilings: { "<model>": { window, maxOutput, ceiling } }. */
   models: {},
-  reasoning: { effort: 'medium', summary: 'auto', mode: null },
+  reasoning: { effort: 'high', summary: 'auto', mode: null },
   retries: 3,
   /**
    * The window of silence the text host may keep before the request is given up.
