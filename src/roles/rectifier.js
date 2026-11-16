@@ -58,6 +58,12 @@ corrects the picture, not a part of it.
 Write every result into the directory the task names, one file per screen. Never write over a reference.
 Read what the tool answers. A small number means the screen is level.
 
+When the tools of the house are not enough, ImageMagick is yours: call magick with the arguments of the
+command line, and call magick_help when you do not remember an operator or the rules of the command line.
+"-deskew" straightens a picture that was shot at an angle, "-distort Perspective" puts a quadrilateral back
+into a rectangle, "-trim" cuts the frame away. Every path stays inside the working directory and the file
+that is written lands in the directory the task names.
+
 Return "keep" for a single flat screen. Return "unresolved" only when a projection was needed and
 not a single set of corners can be placed.
 

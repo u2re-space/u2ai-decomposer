@@ -235,6 +235,7 @@ test('the stages hold the tools their own job needs', () => {
     // The rectifier owns the geometry: it may project a picture and compare two of them, and it
     // may not crop, split or write — a role that redraws a screen does so in the wrong stage.
     assert.ok(RECTIFIER_TOOLS.includes('correct_perspective'), RECTIFIER_TOOLS.join(', '));
+    assert.ok(RECTIFIER_TOOLS.includes('magick'), RECTIFIER_TOOLS.join(', '));
     for (const forbidden of ['crop_image', 'split_image', 'write_file', 'generate_image', 'edit_image']) {
         assert.ok(!RECTIFIER_TOOLS.includes(forbidden), `${forbidden} is not geometry`);
     }

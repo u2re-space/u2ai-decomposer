@@ -84,6 +84,15 @@ Pipeline stages:
 Every stage reports what it decided and what it produced; the run ends with a summary
 of the output path, the screens and the number of layers.
 
+The free ImageMagick:
+  The roles that work on a picture may call ImageMagick itself: the tool "magick"
+  takes the arguments of the command line, one argument per element, and the tool
+  "magick_help" gives the manual — the rules of the command line, the operators and
+  the distort methods. The command is started without a shell, every path stays
+  inside the working directory, the file that is written lands in the directory the
+  stage opened, and the protocols that read from the network or run a script are
+  refused. The switch tools.image_magick turns both tools off.
+
 Cost:
   A repaired fragment is a call to a picture model, and that is the most expensive
   part of the run. The fragments are asked for the cheap quality of their stage
@@ -104,6 +113,9 @@ Config:
   splits the screen instead.
   plan.enabled turns the reception off: the run then does the usual work.
   plan.maxTurns is the budget of the reception.
+  limits.maxPossibleTurns is the ceiling of the turns of one role call: the budget
+  of a stage may not go past it, so a role that keeps asking for tools cannot spin
+  the run forever.
 
 Batch:
   The hosts that serve the batch route carry the flag "supports": { "batch": true }

@@ -31,6 +31,12 @@ Project a picture once. Never call correct_perspective on a file it already wrot
 Then cut the screens. Use crop_image with the bounds of each screen, or split_image when the reference is a
 regular grid of equal frames. Crop from the rectified picture, not from the distorted one.
 
+When the tools of the house are not enough, ImageMagick is yours: call magick with the arguments of the
+command line, and call magick_help when you do not remember an operator or the rules of the command line.
+"-trim" cuts the frame away, "-deskew" straightens a picture that was shot at an angle, "-distort
+Perspective" puts a quadrilateral back into a rectangle. Every path stays inside the working directory and
+the file that is written lands in the output directory the task names.
+
 A collage holds several screens: name every one of them, including the ones that are only partly
 visible at the edge of the picture. Give the rectangle of every screen — x, y, width, height in the
 pixels of the picture you saw — even when you write the file yourself: the harness cuts the pixels

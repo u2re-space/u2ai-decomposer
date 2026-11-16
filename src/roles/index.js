@@ -104,6 +104,10 @@ export function resolveRole(config, name, { model = null, effort = null } = {}) 
  * The runner knows how to ask a role a question and how to read the answer: JSON when the
  * role has a schema, plain text otherwise. A tool loop is optional: when a toolset is given,
  * the calls the model asks for are executed and the answers are fed back.
+ *
+ * The number of the turns of a call is the budget of the stage, but never more than the ceiling
+ * of the house (`limits.maxPossibleTurns`): a role that keeps asking for tools must not spin the
+ * run forever.
  * @param {{ client: object, config?: object, model?: string|null, effort?: string|null, toolset?: object|null, skills?: object|null, onEvent?: Function|null }} opts
  *   `skills` maps a role name to the text of its skill pack.
  * @returns {{ run: Function, resolve: Function }}
@@ -158,7 +162,13 @@ export function createRoleRunner({ client, config = {}, model = null, effort = n
         let last = null;
 
         try {
-            const turns = Math.max(1, Number.isSafeInteger(maxTurns) ? maxTurns : 1);
+            // The budget of the stage may not go past the ceiling of the house: a role that keeps
+            // asking for tools must not spin the run forever.
+            const ceiling = Number.isSafeInteger(config?.limits?.maxPossibleTurns)
+                ? config.limits.maxPossibleTurns
+                : 16;
+            const wanted = Number.isSafeInteger(maxTurns) ? maxTurns : 1;
+            const turns = Math.max(1, Math.min(wanted, ceiling));
             for (let turn = 0; turn < turns; turn++) {
                 notifyRole('role.start', { role: name, model: role.model, effort: role.effort, turn: turn + 1, turns });
                 const answer = await client.responses.create({

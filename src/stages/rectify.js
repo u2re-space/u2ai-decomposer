@@ -53,7 +53,7 @@ export const MAX_RESIDUAL_DEG = 0.8;
 export const MIN_IMPROVEMENT_DEG = 0.4;
 
 /** The tools the rectifier may call: geometry and verification, nothing else. */
-export const RECTIFIER_TOOLS = ['view_image', 'correct_perspective', 'apply_matrix', 'compare_images'];
+export const RECTIFIER_TOOLS = ['view_image', 'correct_perspective', 'apply_matrix', 'compare_images', 'magick', 'magick_help'];
 
 /** What the role is told when the picture has to be cut screen by screen. */
 const SPLIT_NOTE = [

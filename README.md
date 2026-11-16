@@ -202,6 +202,8 @@ Sharp → Canvas → ImageMagick fallback chain:
 - `angles.js`: the turn, the shear and the squeeze of a picture, in degrees
 - `matrix.js`: the projective matrix of 3×3 or 4×4, and the warp that runs on it
 - `distort.js`: the homography and the bilinear warp of a quad
+- `magick-cli.js`: the free command line of ImageMagick and the rules around it
+- `magick-docs.js`: the manual of ImageMagick, written for a role
 - `geometry.js`: rotation and size correction of the pixels, with the skew measured before and after
 - `magick.js`: ImageMagick wrapper
 - `padding.js`: canvas expansion
@@ -374,6 +376,55 @@ apply_matrix — path, matrix_json (9 or 16 numbers, row major), output
 
 The rule of the house stays the same either way: a copy is kept only when the tilt that is
 left in its pixels is smaller than the tilt of the picture it replaces.
+
+### The free ImageMagick
+
+The tools of the house are narrow on purpose: a crop, a split, a projection. But a picture is a
+wide thing, and there are operations that no narrow tool covers: `-deskew` straightens a picture
+that was shot at an angle, `-distort Perspective` puts a quadrilateral back into a rectangle,
+`-trim` cuts the frame away, `-deskew` and `-morphology` clean a scan. So the roles that work on
+a picture are given **ImageMagick itself**.
+
+Two tools carry it:
+
+| Tool | What it does |
+|------|--------------|
+| `magick` | Runs a command of ImageMagick. The arguments are the ones of the command line, one argument per element, without the word `magick` |
+| `magick_help` | Gives the manual: the rules of the command line, the operators, the distort methods |
+
+The roles that work on a picture get them — the extender, the decomposer, the rectifier and the
+restorer. The roles that *judge* a picture (the verifier of a repair, the repairer of a broken
+cut) do not: they have nothing to straighten.
+
+```
+magick — args: ["in.png", "-distort", "Perspective", "0,0 0,0 69,0 0,69", "out.png"]
+→ ImageMagick: exit 0
+  The result is written to out.png
+```
+
+The rules of the house stand around the free command line:
+
+1. **No shell.** The command is started with an array of arguments, so a path with a space or a
+   quote in it cannot become a second command.
+2. **The paths stay inside the run.** Every path of the command is resolved against the root of
+   the run; a path that leaves it — through `..` or through a symlink — is refused. The file that
+   is written has to land in a directory the stage opened for writing (`decomposition/screens/`
+   for the decomposer, the scratch of the stage for the rectifier).
+3. **The protocols are refused.** `msl:` runs a script, `http:` reads from the network, `file:`
+   names a file outside of the run. The harmless ones stay: `xc:` is a canvas of one colour,
+   `png:compression-level=9` is a setting of the format.
+
+A command that fails is not an error of the run: the exit code and the words of stderr are the
+answer, and the model reads them.
+
+The manual is measured, not remembered: the number of the control points of every distort method
+was read off ImageMagick 7.1.2-34 (`Affine` — 3 pairs, `Perspective` — 4 pairs, `Shepards` — any
+number of pairs, `Polynomial` — an order and at least 6 pairs), and the addresses of the full
+manual are in it: [usage.imagemagick.org](https://usage.imagemagick.org/),
+[the distort methods](https://usage.imagemagick.org/distorts/),
+[the command line processing](https://imagemagick.org/command-line-processing/).
+
+The switch `tools.image_magick` (on by default) turns both tools off.
 
 ### The AI mode of the rectify stage
 
@@ -674,6 +725,18 @@ middle leaves the old file and not a broken one.
 - fallback.models: the models that get a picture request when every host refused the model
 - output.work: where the state of a run goes: `.ai/tmp/` by default. It dies with the run.
 - plan.enabled / plan.maxTurns: the reception of the run and its budget
+- limits.maxPossibleTurns: the ceiling of the turns of one role call
+
+The limits of the house:
+
+| Field | Meaning | Default |
+|-------|---------|---------|
+| `maxPossibleTurns` | The ceiling of the turns of one role call: the budget of a stage may not go past it, so a role that keeps asking for tools cannot spin the run forever | `16` |
+| `stageTimeoutMs` | The wall-clock budget of one stage | `900000` |
+| `requestRetries` | The retries of one API request | `3` |
+
+The ceiling comes from the environment as well: `AI_DECOMPOSE_MAX_POSSIBLE_TURNS` (the old name
+`AI_DECOMPOSE_MAX_TURNS` still works).
 
 The section of the plan:
 

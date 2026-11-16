@@ -297,7 +297,7 @@ test('inline mode: the role gets no tool that writes a file', async () => {
         await runDecompose(state, () => {});
         const names = (calls[0].params.extraTools ?? []).map((spec) => spec.name);
         assert.ok(names.includes('view_image'));
-        for (const forbidden of ['crop_image', 'split_image', 'generate_image', 'edit_image', 'correct_perspective']) {
+        for (const forbidden of ['crop_image', 'split_image', 'generate_image', 'edit_image', 'correct_perspective', 'magick']) {
             assert.ok(!names.includes(forbidden), `${forbidden} must not be offered in inline mode`);
         }
     } finally {

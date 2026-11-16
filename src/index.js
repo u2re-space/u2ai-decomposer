@@ -14,6 +14,8 @@ export * from './openai/chat.js';
 export * from './config.js';
 export * from './image/raster.js';
 export * from './image/magick.js';
+export * from './image/magick-cli.js';
+export * from './image/magick-docs.js';
 export * from './image/skew.js';
 export * from './image/distort.js';
 export * from './image/angles.js';

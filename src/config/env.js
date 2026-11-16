@@ -75,8 +75,8 @@ export function fromEnv(env = process.env) {
   if (imageTimeoutMs != null) set(['imageTimeoutMs'], imageTimeoutMs);
   if (env.AI_DECOMPOSE_STREAMING === '0' || env.AI_DECOMPOSE_STREAMING === 'false') set(['streaming'], false);
   else if (env.AI_DECOMPOSE_STREAMING === '1' || env.AI_DECOMPOSE_STREAMING === 'true') set(['streaming'], true);
-  const maxTurns = intInRange(env.AI_DECOMPOSE_MAX_TURNS, 1, 200);
-  if (maxTurns != null) set(['limits', 'maxTurns'], maxTurns);
+  const maxTurns = intInRange(env.AI_DECOMPOSE_MAX_POSSIBLE_TURNS ?? env.AI_DECOMPOSE_MAX_TURNS, 1, 200);
+  if (maxTurns != null) set(['limits', 'maxPossibleTurns'], maxTurns);
 
   // --- backends -------------------------------------------------------------
   const backends = backendList(env.AI_DECOMPOSE_BACKENDS);

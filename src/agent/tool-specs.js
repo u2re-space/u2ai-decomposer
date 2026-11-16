@@ -133,6 +133,47 @@ export const TOOL_SPECS = Object.freeze({
         required: ['path', 'matrix_json'],
         roles: ['rectifier'],
     },
+    magick: {
+        configKey: 'image_magick',
+        description: 'Run ImageMagick on a picture. The arguments are the ones of the "magick" command line, '
+            + 'without the word "magick": one argument per element, the last one is the file that is written. '
+            + 'The command is started without a shell, every path stays inside the working directory and the file '
+            + 'that is written lands in the directory the task names. Call magick_help when you do not remember '
+            + 'an operator or the rules of the command line.',
+        parameters: {
+            type: 'object',
+            properties: {
+                args: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'The arguments of the command line, one argument per element, without the word "magick".',
+                },
+            },
+            required: ['args'],
+            additionalProperties: false,
+        },
+        required: ['args'],
+        roles: ['extender', 'decomposer', 'rectifier', 'restorer'],
+    },
+    magick_help: {
+        configKey: 'image_magick',
+        description: 'The manual of ImageMagick: the rules of the command line, the operators and the distort '
+            + 'methods with the control points each of them wants.',
+        parameters: {
+            type: 'object',
+            properties: {
+                topic: {
+                    type: 'string',
+                    enum: ['command-line', 'operators', 'distorts', 'all'],
+                    description: 'The part of the manual.',
+                },
+            },
+            required: ['topic'],
+            additionalProperties: false,
+        },
+        required: ['topic'],
+        roles: ['extender', 'decomposer', 'rectifier', 'restorer'],
+    },
     generate_image: {
         configKey: 'image_generate',
         description: 'Draw a new picture from a prompt.',

@@ -1497,6 +1497,53 @@ planned.md (RU). Проверка: `npm test` — 277 тестов, все пр�
 
 ---
 
+## 41. Свободный ImageMagick для ролей, документация ImageMagick, maxPossibleTurns (step-c12) — ✅ ЗАВЕРШЁН
+
+Инструменты дома узкие: обрезать, разрезать, спроецировать. Но картинка — широкая вещь, и есть
+операции, которых нет ни в одном узком инструменте: `-deskew` выпрямляет снятый под углом
+снимок, `-distort Perspective` возвращает четырёхугольник в прямоугольник, `-trim` срезает рамку.
+Поэтому роль, работающая с картинкой, получает **сам ImageMagick**. А `limits.maxTurns=24` не
+читался никем — роль, которая бесконечно просит инструменты, могла крутить прогон без конца.
+
+- [x] `src/image/magick-cli.js` — свободная командная строка: `parseMagickArgs` (массив или
+      строка, кавычки группируют аргумент), `forbiddenMagickArg` (`@file`, протоколы `msl:`,
+      `http:`, `file:` и операторы `-write`, `-script`), `magickOutputFile` (файл, который пишет
+      команда, — последний аргумент), `runMagick` (запуск без shell, массивом аргументов)
+- [x] `src/image/magick-docs.js` — руководство для ИИ: правила командной строки, операторы,
+      методы искажений и адреса полного руководства (`usage.imagemagick.org`,
+      `usage.imagemagick.org/distorts/`, `imagemagick.org/command-line-processing/`)
+- [x] `src/agent/tool-specs.js` — инструменты `magick` (args: массив аргументов) и
+      `magick_help` (topic: command-line | operators | distorts | all), переключатель
+      `tools.image_magick`; роли: extender, decomposer, rectifier, restorer — роли, которые
+      судят картинку, командную строку не получают
+- [x] `src/agent/tools.js` — исполнитель: отказ протоколов и `@file`, проверка каждого пути
+      команды внутри корня прогона, проверка файла результата по открытым стадией каталогам,
+      запуск `magick` в корне прогона, ответ — код выхода, stdout и stderr
+- [x] `src/roles/rectifier.js`, `src/roles/decomposer.js` — инструкции: ImageMagick доступен,
+      `magick_help` помнит оператор
+- [x] `src/stages/rectify.js`, `src/stages/decompose.js` — `magick` и `magick_help` в списках
+      инструментов ролей (в inline-режиме decomposer'а — нет)
+- [x] `src/config/defaults.js` — `tools.image_magick: true`, `limits.maxPossibleTurns: 16`
+      (вместо мёртвого `limits.maxTurns`)
+- [x] `src/config/env.js` — `AI_DECOMPOSE_MAX_POSSIBLE_TURNS` (старое имя
+      `AI_DECOMPOSE_MAX_TURNS` работает)
+- [x] `src/roles/index.js` — потолок ходов: бюджет стадии не проходит мимо
+      `limits.maxPossibleTurns`
+- [x] `src/help.js` — справка: свободный ImageMagick и потолок ходов
+- [x] `test/magick.test.js` — 13 тестов: аргументы, отказы, файл результата, руководство,
+      запуск команды без shell (тесты помечены как пропущенные, если ImageMagick не установлен)
+- [x] `test/roles.test.js` — потолок ходов; `test/agent.test.js` — каталог и переключатель;
+      `test/config.test.js` — переменная окружения; `test/phases.test.js`,
+      `test/decompose.test.js` — списки инструментов
+- [x] README (EN) — раздел «The free ImageMagick», таблица лимитов, модули `magick-cli.js`
+      и `magick-docs.js`
+- [x] Проверка: `npm test` — 350 тестов, все проходят
+
+Числа в руководстве измерены на ImageMagick 7.1.2-34: `Affine` — 3 пары, `Perspective` — 4 пары,
+`Shepards` — любое число пар, `Polynomial` — порядок и не меньше 6 пар.
+
+---
+
 ## Порядок работы и зависимости шагов
 
 ```

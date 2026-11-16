@@ -125,8 +125,8 @@ export const defaults = {
   limits: {
     /** Wall-clock budget per stage. */
     stageTimeoutMs: 15 * 60_000,
-    /** Agent-loop turns per role call. */
-    maxTurns: 24,
+    /** The ceiling of the turns of one role call: the budget of a stage may not go past it. */
+    maxPossibleTurns: 16,
     /** Retries per API request. */
     requestRetries: 3,
     /** Max raster bytes an image tool may return into the context. */
@@ -145,6 +145,7 @@ export const defaults = {
     image_compare: true,
     image_correct_perspective: true,
     image_apply_matrix: true,
+    image_magick: true,
     image_generate: true,
     image_edit: true,
   },

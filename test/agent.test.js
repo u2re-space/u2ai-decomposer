@@ -22,10 +22,31 @@ test('the config switch of a tool is named after its domain', () => {
     assert.equal(configKeyFor('crop_image'), 'image_crop');
     assert.equal(configKeyFor('correct_perspective'), 'image_correct_perspective');
     assert.equal(configKeyFor('apply_matrix'), 'image_apply_matrix');
+    assert.equal(configKeyFor('magick'), 'image_magick');
+    assert.equal(configKeyFor('magick_help'), 'image_magick');
     assert.equal(toolEnabled({ image_crop: false }, 'crop_image'), false);
     assert.equal(toolEnabled({ image_crop: true }, 'crop_image'), true);
     // A tool that the config does not mention is on.
     assert.equal(toolEnabled({}, 'crop_image'), true);
+});
+
+test('the free ImageMagick is a tool of the roles that work on a picture', () => {
+    const all = toolSpecs({});
+    assert.ok(all.some((spec) => spec.name === 'magick'));
+    assert.ok(all.some((spec) => spec.name === 'magick_help'));
+
+    const withoutMagick = toolSpecs({ image_magick: false });
+    assert.ok(!withoutMagick.some((spec) => spec.name === 'magick'));
+    assert.ok(!withoutMagick.some((spec) => spec.name === 'magick_help'));
+
+    const rectifier = toolSpecs({}, { role: 'rectifier' });
+    assert.ok(rectifier.some((spec) => spec.name === 'magick'));
+    assert.ok(rectifier.some((spec) => spec.name === 'magick_help'));
+
+    // A role that judges a picture does not get the command line: it has nothing to straighten.
+    const verifier = toolSpecs({}, { role: 'restorerVerify' });
+    assert.ok(!verifier.some((spec) => spec.name === 'magick'));
+    assert.ok(!verifier.some((spec) => spec.name === 'magick_help'));
 });
 
 test('the tool list follows the switches and the role', () => {

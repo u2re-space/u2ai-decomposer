@@ -67,6 +67,25 @@ test('the environment overrides the file, and the flags override the environment
     }
 });
 
+test('the ceiling of the turns comes from the environment', async () => {
+    const home = await homeDir();
+    try {
+        const config = await loadConfig({
+            env: cleanEnv(home, { AI_DECOMPOSE_MAX_POSSIBLE_TURNS: '9' }),
+            ensureHome: false,
+        });
+        assert.equal(config.limits.maxPossibleTurns, 9);
+        // The old name still works.
+        const old = await loadConfig({
+            env: cleanEnv(home, { AI_DECOMPOSE_MAX_TURNS: '7' }),
+            ensureHome: false,
+        });
+        assert.equal(old.limits.maxPossibleTurns, 7);
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
 test('a placeholder is expanded after the sources are merged', async () => {
     const home = await homeDir();
     try {

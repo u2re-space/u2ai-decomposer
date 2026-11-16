@@ -187,6 +187,49 @@ export function createToolset({ root, config, client, role = null, mcp = [], wri
                     + `(${result.width}×${result.height}, turned ${angles.rotation ?? 0}°, `
                     + `skewed ${angles.skew ?? 0}°, residual tilt ${result.residual?.angleDeg ?? 0}°)`;
             }
+            case 'magick': {
+                const { parseMagickArgs, forbiddenMagickArg, magickOutputFile, runMagick } =
+                    await import('../image/magick-cli.js');
+                const line = parseMagickArgs(args.args ?? args.args_text ?? args.command);
+                if (!line.length) return 'ImageMagick: the command line is empty.';
+                for (const arg of line) {
+                    const reason = forbiddenMagickArg(arg);
+                    if (reason) return `ImageMagick: ${reason}`;
+                }
+                // Every path of the command stays inside the root of the run.
+                for (const arg of line) {
+                    if (arg.startsWith('-')) continue;
+                    if (!/[\\/]/.test(arg) && !/\.[a-zA-Z0-9]{1,5}$/.test(arg)) continue;
+                    try {
+                        await resolveInside(root, arg, { allowRoot: false });
+                    } catch (error) {
+                        return `ImageMagick: ${error.message}`;
+                    }
+                }
+                // The file that is written lands in a directory the stage opened for writing.
+                const output = magickOutputFile(line);
+                if (output) {
+                    try {
+                        await writePath(output);
+                    } catch (error) {
+                        return `ImageMagick: ${error.message}`;
+                    }
+                }
+                const result = await runMagick({
+                    args: line,
+                    cwd: root,
+                    exe: config?.raster?.magickPath ?? null,
+                });
+                const lines = [`ImageMagick: exit ${result.code}`];
+                if (result.stdout.trim()) lines.push(result.stdout.trim());
+                if (result.stderr.trim()) lines.push(result.stderr.trim());
+                if (output) lines.push(`The result is written to ${output}`);
+                return lines.join('\n');
+            }
+            case 'magick_help': {
+                const { magickDoc } = await import('../image/magick-docs.js');
+                return magickDoc(args.topic);
+            }
             case 'generate_image': {
                 if (!client?.images) return 'Images API unavailable';
                 const { images } = await client.images.generate({

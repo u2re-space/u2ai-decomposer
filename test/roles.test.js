@@ -126,6 +126,58 @@ test('a call of the schema is the answer of the role, not a request for a tool',
     assert.deepEqual(executed, [], 'the schema is not a tool of the run');
 });
 
+test('the budget of a stage does not go past the ceiling of the house', async () => {
+    const calls = [];
+    const client = {
+        responses: {
+            async create(params) {
+                calls.push(params);
+                return {
+                    id: 'resp_1',
+                    status: 'completed',
+                    output: [{
+                        type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'view_image',
+                        arguments: '{"path":"a.png"}',
+                    }],
+                };
+            },
+        },
+    };
+    const toolset = {
+        specs: [{ type: 'function', name: 'view_image', parameters: { type: 'object', properties: {} } }],
+        async execute() { return 'Image a.png: 100x50'; },
+    };
+    // The stage asks for a hundred turns; the house allows three.
+    const runner = createRoleRunner({
+        client,
+        config: { model: 'm', roles: {}, limits: { maxPossibleTurns: 3 } },
+        toolset,
+    });
+    await runner.run('decomposer', { text: 'look at it', maxTurns: 100 });
+    assert.equal(calls.length, 3, 'the run stopped at the ceiling');
+
+    // Without a ceiling of its own the house keeps sixteen.
+    const other = [];
+    const otherClient = {
+        responses: {
+            async create(params) {
+                other.push(params);
+                return {
+                    id: 'resp_1',
+                    status: 'completed',
+                    output: [{
+                        type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'view_image',
+                        arguments: '{"path":"a.png"}',
+                    }],
+                };
+            },
+        },
+    };
+    const runner2 = createRoleRunner({ client: otherClient, config: { model: 'm', roles: {} }, toolset });
+    await runner2.run('decomposer', { text: 'look at it', maxTurns: 100 });
+    assert.equal(other.length, 16);
+});
+
 test('the tool loop runs the calls of the model and feeds the results back', async () => {
     const answers = [
         {
