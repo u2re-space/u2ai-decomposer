@@ -11,7 +11,7 @@ import { ENUMS } from './constants.js';
 export const defaults = {
   // --- API -----------------------------------------------------------------
   /** Text model for the role agents. */
-  model: 'minimax/minimax-m3.1-flash',
+  model: 'moonshotai/kimi-k3.1-pro',
   /** Picture model for generate/edit tools and the reconstruct stage. */
   imageModel: 'openai/gpt-image-2.6-sunburst',
   /** Endpoint of both APIs; backends[] below can override it per route. */
