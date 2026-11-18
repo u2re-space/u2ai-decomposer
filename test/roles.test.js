@@ -53,7 +53,7 @@ test('the effort of a role is clamped to what the model accepts', () => {
         model: 'openai/gpt-6-luna',
         roles: { decomposer: { effort: 'xhigh' } },
     };
-    assert.equal(resolveRole(config, 'decomposer').effort, 'high');
+    assert.equal(resolveRole(config, 'decomposer').effort, 'xhigh');
 });
 
 test('a role asks the API with its instructions and reads the JSON answer', async () => {

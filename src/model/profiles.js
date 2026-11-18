@@ -33,6 +33,7 @@ export const MODEL_PROFILES = Object.freeze({
     'google/gemini-4-hydrogen': { window: 1024 * 1024 * 4, maxOutput: 64 * 1024, ceiling: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'], schemaChannel: 'auto' },
     'moonshotai/kimi-k3.1-pro': { window: 1024 * 1024 * 4, maxOutput: 1024 * 1024, ceiling: 'high', efforts: ['none', 'low', 'medium', 'high'], schemaChannel: 'auto' },
     'openai/gpt-6.1-sol': { window: 272 * 1024 * 4, maxOutput: 128 * 1024, ceiling: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'], schemaChannel: 'format' },
+    'openai/gpt-6.2-sol': { window: 272 * 1024 * 4, maxOutput: 128 * 1024, ceiling: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'], schemaChannel: 'format' },
     'openai/gpt-6.1-terra': { window: 272 * 1024 * 4, maxOutput: 128 * 1024, ceiling: 'high', efforts: ['low', 'medium', 'high'], schemaChannel: 'format' },
     'openai/gpt-6-luna': { window: 272 * 1024 * 4, maxOutput: 128 * 1024, ceiling: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'], schemaChannel: 'format' },
            'gpt-6-luna': { window: 272 * 1024 * 4, maxOutput: 128 * 1024, ceiling: 'xhigh', efforts: ['low', 'medium', 'high', 'xhigh'], schemaChannel: 'format' },

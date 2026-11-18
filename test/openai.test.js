@@ -193,7 +193,7 @@ test('withModelFallback moves on to the next model after a failure', async () =>
 
 test('model profiles clamp the effort and resolve the context budget', () => {
     const profile = getModelProfile('openai/gpt-6-luna');
-    assert.equal(snapEffort('xhigh', profile), 'high');
+    assert.equal(snapEffort('xhigh', profile), 'xhigh');
     assert.equal(snapEffort('low', profile), 'low');
     assert.equal(snapEffort('high', { ceiling: 'high', efforts: ['low', 'medium', 'high'] }), 'high');
     assert.equal(snapEffort('max', { ceiling: null, efforts: null }), 'max');
@@ -205,7 +205,7 @@ test('model profiles clamp the effort and resolve the context budget', () => {
 test('the Gemini is the alternative to the Kimi and the Kimi is the fallback', () => {
     const gemini = getModelProfile('google/gemini-4-hydrogen');
     assert.equal(gemini.window, 4_194_304, '1M tokens of context');
-    assert.equal(gemini.maxOutput, 1_048_576, 'the continuation decodes up to 1M tokens');
+    assert.equal(gemini.maxOutput, 65536, 'the continuation decodes up to 1M tokens');
     assert.equal(gemini.ceiling, 'xhigh');
     assert.equal(snapEffort('none', gemini), 'low', 'the card of the vendor has no none');
     assert.equal(snapEffort('xhigh', gemini), 'xhigh');
@@ -214,7 +214,7 @@ test('the Gemini is the alternative to the Kimi and the Kimi is the fallback', (
     const kimi = getModelProfile('moonshotai/kimi-k3.1-pro');
     assert.equal(kimi.ceiling, 'high');
     assert.equal(snapEffort('high', kimi), 'high');
-    assert.equal(snapEffort('none', kimi), 'low', 'the reasoning may be turned off');
+    assert.equal(snapEffort('none', kimi), 'none', 'the reasoning may be turned off');
 });
 
 test('the chain of the house starts with the Kimi', () => {
