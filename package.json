@@ -5,7 +5,8 @@
   "type": "module",
   "main": "./index.js",
   "bin": {
-    "ai-decompose": "./bin/ai-decompose.js"
+    "ai-decompose": "./bin/ai-decompose.js",
+    "ai-decompose-worker": "./bin/ai-decompose-worker.js"
   },
   "repository": {
     "type": "git",
@@ -41,7 +42,8 @@
     "@modelcontextprotocol/node": "^2.1.1",
     "@resvg/resvg-js": "^2.6.2",
     "canvas": "^4.0.0-rc3",
-    "sharp": "^0.35.5"
+    "sharp": "^0.35.5",
+    "terminal-kit": "^3.1.4"
   },
   "allowScripts": {
     "canvas@3.2.3": true,

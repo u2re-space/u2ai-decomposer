@@ -4,6 +4,7 @@
  * @ai.hint keep
  */
 export { createClient, ApiError } from './src/openai/client.js';
+export { mainTui } from './src/tui/cli.js';
 export { loadConfig, defaults as configDefaults } from './src/config.js';
 export { rasterInfo, rasterCrop, rasterPatch, decodeRgba, rasterPadImageBytes } from './src/image/raster.js';
 export { createRoleRunner } from './src/roles/index.js';

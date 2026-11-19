@@ -73,6 +73,12 @@ ai-decompose -i original.png --advanced --out ./output
 The task of the run is the prompt: `--prompt` or a positional argument. It is what the
 reception reads when it decides what is going to be done to the picture.
 
+In a terminal the command opens the graphical dashboard of the house: the stages of the run,
+the progress, the live log and the operator line. The run itself is the internal worker
+`ai-decompose-worker`: it owns the ordinary stdout and stderr and talks to the shell over a
+versioned IPC protocol. A pipe, a redirect, `--json`, `--quiet` and `--headless` use the worker
+directly — the machine output stays the same (`--json` prints one json object per line).
+
 ### The reception and the plan
 
 A run that was not told which stages to run begins with the reception. It gets the task and the

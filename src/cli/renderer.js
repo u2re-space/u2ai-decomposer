@@ -143,15 +143,22 @@ export function summaryLines(result) {
  * something behind. The colored renderer is for a person at a terminal; this one is for the
  * reader on the other side of the pipe.
  *
- * @param {{ verbose?: boolean }} opts
+ * @param {{ verbose?: boolean, mode?: 'plain'|'json'|'quiet' }} opts
  * @returns {{ event: (e: object) => void }}
  */
-export function createPlainRenderer({ verbose = false } = {}) {
+export function createPlainRenderer({ verbose = false, mode = 'plain' } = {}) {
     let stage = '';
     let stageStartedAt = Date.now();
 
     function event(e) {
         if (!e || !e.type) return;
+        // The machine modes of the house: one json object per line, or nothing but the
+        // result of the run.
+        if (mode === 'json') {
+            console.log(JSON.stringify(e));
+            return;
+        }
+        if (mode === 'quiet') return;
         switch (e.type) {
             case 'plan':
                 printPlan(e);
@@ -363,10 +370,10 @@ export function createPlainRenderer({ verbose = false } = {}) {
  * The renderer keeps one live line: the stage header stays, the line under it shows the
  * work of the moment and the time it has been going on. Every other line of the run is
  * written above it, so the reader always sees where the run is.
- * @param {{ verbose?: boolean }} opts
+ * @param {{ verbose?: boolean, mode?: 'plain'|'json'|'quiet' }} opts
  * @returns {{ event: (e: object) => void }}
  */
-export function createRenderer({ verbose = false } = {}) {
+export function createRenderer({ verbose = false, mode = 'plain' } = {}) {
     let stageLabel = '';
     let activity = '';
     let stageStartedAt = Date.now();
@@ -451,6 +458,17 @@ export function createRenderer({ verbose = false } = {}) {
     };
     function event(e) {
         if (!e || !e.type) return;
+        // The machine modes of the house: one json object per line, or nothing but the
+        // result of the run.
+        if (mode === 'json') {
+            stopTicker();
+            console.log(JSON.stringify(e));
+            return;
+        }
+        if (mode === 'quiet') {
+            stopTicker();
+            return;
+        }
         switch (e.type) {
             case 'plan':
                 stopTicker();

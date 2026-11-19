@@ -11,6 +11,15 @@ export const HELP = `ai-decompose — multi-phase AI-agentic image decomposer
 Usage:
   ai-decompose [options] [task]
 
+Interface:
+  In a terminal, ai-decompose opens the graphical dashboard of the house: the stages of
+  the run, the progress, the live log and the operator line. The internal worker is
+  ai-decompose-worker; it owns the ordinary stdout and stderr and talks to the shell over
+  a versioned IPC protocol.
+
+  A pipe, a redirect, --json, --quiet and --headless use the worker directly. The machine
+  output stays the same: --json prints one json object per line on stdout.
+
 Options:
   -i, --image <path>      Input reference image(s). Can be specified multiple times.
   -o, --out <dir>         Output directory (default: .).
@@ -33,6 +42,10 @@ Options:
   --batch                 Submit the requests of the parallel rounds as one batch
                           and stop: the answers are not here yet.
   --batch-fetch           Take the answers of the submitted batches and go on.
+  --json                  One json object per line on stdout.
+  --quiet                 Only the result of the run.
+  --headless              The worker without the graphical shell.
+  --ascii                 The symbols of the terminal without the unicode ones.
   -v, --verbose           Verbose output.
   -h, --help              Show this help message.
   --version               Show version.

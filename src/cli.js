@@ -67,6 +67,10 @@ export function parseArgv(argv) {
             'stop-after': { type: 'string' },
             'batch': { type: 'boolean', default: false },
             'batch-fetch': { type: 'boolean', default: false },
+            json: { type: 'boolean', default: false },
+            quiet: { type: 'boolean', default: false },
+            headless: { type: 'boolean', default: false },
+            ascii: { type: 'boolean', default: false },
         },
         strict: false,
         allowPositionals: true,
@@ -106,6 +110,16 @@ export function parseArgv(argv) {
         batch: parsed.values.batch === true,
         batchFetch: parsed.values['batch-fetch'] === true,
         prompt,
+        positionals: (parsed.positionals ?? []).map(String),
+        flags: {
+            json: parsed.values.json === true,
+            quiet: parsed.values.quiet === true,
+            headless: parsed.values.headless === true,
+            ascii: parsed.values.ascii === true,
+            verbose,
+            help: parsed.values.help ?? false,
+            version: parsed.values.version ?? false,
+        },
     };
 }
 
@@ -128,10 +142,14 @@ export function apiKeyAvailable(config, env = process.env) {
 
 /**
  * Main entry point: load config, create client, run the pipeline.
+ *
+ * The renderer and the operator channel may come from the worker: the graphical shell runs
+ * the same command in its own process and listens to the events over the protocol.
  * @param {string[]} argv
+ * @param {{ renderer?: object|null, input?: object|null }} [options]
  * @returns {Promise<number>} exit code
  */
-export async function main(argv = process.argv.slice(2)) {
+export async function main(argv = process.argv.slice(2), { renderer: given = null, input = null } = {}) {
     // Handle --help / --version before config load.
     if (argv.includes('--help') || argv.includes('-h')) {
         console.log(HELP);
@@ -162,9 +180,10 @@ export async function main(argv = process.argv.slice(2)) {
         return 1;
     }
     const isTTY = detectMode() === 'tty';
-    const renderer = isTTY
-        ? createRenderer({ verbose: opts.verbose })
-        : createPlainRenderer({ verbose: opts.verbose });
+    const mode = opts.flags.json ? 'json' : (opts.flags.quiet ? 'quiet' : 'plain');
+    const renderer = given ?? (isTTY
+        ? createRenderer({ verbose: opts.verbose, mode })
+        : createPlainRenderer({ verbose: opts.verbose, mode }));
 
     // The batch route is two-phase: the first run submits the requests of a parallel round and
     // stops, the second one takes the answers and goes on. The journal is what the two phases
